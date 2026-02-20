@@ -1,0 +1,171 @@
+/**
+ * Payment Engine Types
+ *
+ * This file defines all the data structures used by the payment engine.
+ */
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+export type PaymentType = 'transfer' | 'gift' | 'request' | 'merchant';
+
+export type PaymentStatus =
+  | 'created'
+  | 'pending'
+  | 'confirming'
+  | 'confirmed'
+  | 'settling'
+  | 'settled'
+  | 'expired'
+  | 'failed';
+
+export type CryptoCurrency = 'BTC' | 'ETH' | 'BNB' | 'TRX' | 'USDT';
+
+export type Network =
+  | 'bitcoin'
+  | 'ethereum'
+  | 'bsc'
+  | 'tron'
+  | 'polygon'
+  | 'base'
+  | 'erc20'
+  | 'bep20'
+  | 'trc20';
+
+export const NETWORK_TO_CHAIN: Record<Network, string> = {
+  bitcoin: 'bitcoin',
+  ethereum: 'ethereum',
+  bsc: 'bsc',
+  tron: 'tron',
+  polygon: 'polygon',
+  base: 'base',
+  erc20: 'ethereum',
+  bep20: 'bsc',
+  trc20: 'tron',
+};
+
+export type FiatCurrency = 'NGN' | 'GHS' | 'KES' | 'ZAR';
+
+// =============================================================================
+// INPUT TYPES
+// =============================================================================
+
+export interface PayerInput {
+  chatId: string;
+  phone?: string;
+  walletAddress?: string;
+}
+
+export interface ReceiverInput {
+  bankCode: string;
+  accountNumber: string;
+  accountName: string;
+  phone?: string;
+}
+
+export interface CreatePaymentInput {
+  type: PaymentType;
+  fiatAmount: number;
+  fiatCurrency: FiatCurrency;
+  crypto: CryptoCurrency;
+  network: Network;
+  payer: PayerInput;
+  receiver?: ReceiverInput;
+  merchantId?: string;
+  merchantReference?: string;
+  callbackUrl?: string;
+  metadata?: Record<string, unknown>;
+}
+
+// =============================================================================
+// OUTPUT TYPES
+// =============================================================================
+
+export interface RateLock {
+  rate: number;
+  assetPrice: number;
+  lockedAt: Date;
+  expiresAt: Date;
+}
+
+export interface PaymentSession {
+  id: string;
+  reference: string;
+  type: PaymentType;
+  status: PaymentStatus;
+  fiatAmount: number;
+  fiatCurrency: FiatCurrency;
+  cryptoAmount: number;
+  crypto: CryptoCurrency;
+  network: Network;
+  rate: number;
+  assetPrice: number;
+  rateLockedAt: Date;
+  chargeAmount: number;
+  chargeCrypto: number;
+  depositAddress: string;
+  walletId: number;
+  payerId?: number;
+  payerChatId: string;
+  receiverId?: number;
+  merchantId?: string;
+  txHash?: string;
+  confirmations?: number;
+  receivedAmount?: number;
+  createdAt: Date;
+  expiresAt: Date;
+  confirmedAt?: Date;
+  settledAt?: Date;
+  metadata?: Record<string, unknown>;
+  cashbackAmount?: number;
+  cashbackCredited?: boolean;
+}
+
+// =============================================================================
+// INTERNAL TYPES
+// =============================================================================
+
+export interface WalletAssignment {
+  address: string;
+  walletId: number;
+  assignedAt: Date;
+  expiresAt: Date;
+}
+
+export interface PaymentEngineConfig {
+  sessionTtlMinutes: number;
+  rateLockTtlMinutes: number;
+  amountTolerance: number;
+  confirmations: {
+    bitcoin: number;
+    ethereum: number;
+    bsc: number;
+    tron: number;
+    polygon: number;
+    base: number;
+  };
+}
+
+export const DEFAULT_CONFIG: PaymentEngineConfig = {
+  sessionTtlMinutes: 30,
+  rateLockTtlMinutes: 30,
+  amountTolerance: 0.02,
+  confirmations: {
+    bitcoin: 2,
+    ethereum: 12,
+    bsc: 15,
+    tron: 19,
+    polygon: 128,
+    base: 12,
+  },
+};
+
+export function getRequiredConfirmations(
+  network: Network,
+  config: PaymentEngineConfig = DEFAULT_CONFIG
+): number {
+  const chain = NETWORK_TO_CHAIN[network];
+  const chainKey = chain as keyof typeof config.confirmations;
+  return config.confirmations[chainKey] ?? 12;
+}

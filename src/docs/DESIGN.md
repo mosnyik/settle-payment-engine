@@ -381,11 +381,20 @@ Test:  https://sandbox.2settle.io/v1
 
 ### Authentication
 
-All API requests include the secret key in the `Authorization` header:
+All API requests require three authentication headers:
 
+```http
+X-API-Key: pk_live_xxxxx          # Your public API key ID
+X-Timestamp: 1708267200000        # Current timestamp in milliseconds
+X-Signature: 8f4a3b2c1d...        # HMAC-SHA256 signature
 ```
-Authorization: Bearer sk_live_xxx
+
+The signature is computed as:
 ```
+signature = HMAC-SHA256(keyHash, "{timestamp}|{METHOD}|{path}|{bodyHash}")
+```
+
+> **See [SECURITY.md](./SECURITY.md) for complete authentication guide with code examples.**
 
 ### Transfer Endpoints
 
@@ -831,14 +840,31 @@ The chat product and merchant gateway share the same underlying payment engine:
 
 ## Security Considerations
 
-1. **API key storage** — Secret keys stored as bcrypt/argon2 hashes. Never returned after creation.
-2. **Wallet private keys** — Already in DB. Must be encrypted at rest. Consider moving to a secrets manager (AWS KMS, Vault) as you scale.
-3. **Webhook secrets** — Unique per merchant. HMAC-SHA512 signatures on all payloads.
-4. **Rate limiting** — Per-merchant, per-endpoint. Prevent abuse and wallet pool exhaustion.
-5. **Wallet pool exhaustion** — If all wallets are assigned, new payments queue or return 503. Monitor pool utilization.
-6. **Amount validation** — On-chain deposit must match expected crypto amount (with configurable tolerance).
-7. **Gift/Request ID security** — IDs should be unguessable (use crypto-random generation).
-8. **Claim validation** — Verify gift hasn't been claimed, isn't expired.
+> **For detailed security implementation and client integration guide, see [SECURITY.md](./SECURITY.md)**
+
+### Authentication Model
+
+The Payment Engine uses **API Key + HMAC Signature** authentication:
+
+- **API Key ID (`pk_...`)**: Public identifier sent in `X-API-Key` header
+- **Secret Key (`sk_...`)**: Used to generate HMAC signatures, never sent over the network
+- **HMAC-SHA256 Signature**: Computed from `timestamp|METHOD|path|bodyHash`
+- **Timestamp Validation**: Requests must be within 5 minutes to prevent replay attacks
+
+### Security Layers
+
+1. **Authentication** — API key + HMAC signature verification on all protected endpoints
+2. **Rate Limiting** — Per-API-key limits (100/1000/10000 requests per minute by tier)
+3. **IP Whitelisting** — Optional per-key IP restrictions with CIDR support
+4. **Security Headers** — XSS protection, HSTS, CSP, no-cache headers
+5. **Audit Logging** — All requests logged with timestamps, IPs, response times
+
+### Additional Protections
+
+6. **Wallet pool exhaustion** — If all wallets are assigned, new payments queue or return 503. Monitor pool utilization.
+7. **Amount validation** — On-chain deposit must match expected crypto amount (with configurable tolerance).
+8. **Gift/Request ID security** — IDs are cryptographically random and unguessable.
+9. **Claim validation** — Verify gift hasn't been claimed, isn't expired.
 
 ---
 

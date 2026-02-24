@@ -32,6 +32,7 @@ src/
 │   │   ├── wallet/             # Wallet pool
 │   │   ├── rate/               # Rate service
 │   │   ├── charges/            # Fee calculation
+│   │   ├── watcher/            # Deposit watcher (blockchain monitoring)
 │   │   └── types.ts            # Type definitions
 │   └── transaction/            # Transaction persistence
 ├── security/                   # Security module
@@ -94,6 +95,49 @@ DELETE /admin/api-keys/:keyId       # Revoke key
 - **Audit Logging**: All requests logged with timestamps, IPs, response times
 - **Security Headers**: XSS, HSTS, CSP, no-cache
 
+## Deposit Watcher
+
+On-demand blockchain monitoring - only polls addresses with active payment sessions.
+
+- Starts watching when a session is created (wallet assigned)
+- Stops watching when deposit is confirmed or session expires
+- No unnecessary API calls when idle
+
+### Supported Chains
+
+| Chain | API | Confirmations | Polling Interval |
+|-------|-----|---------------|------------------|
+| Bitcoin | Blockstream.info | 2 | 60s |
+| Ethereum/ERC20 | Etherscan | 12 | 15s |
+| BSC/BEP20 | BscScan | 15 | 5s |
+| Tron/TRC20 | TronGrid | 19 | 5s |
+
+### Enable Watcher
+
+```env
+WATCHER_ENABLED=true
+
+# Required API keys (get free from respective sites)
+ETHERSCAN_API_KEY=your_key
+BSCSCAN_API_KEY=your_key
+TRONGRID_API_KEY=your_key  # Optional but recommended
+```
+
+### Fraud Protection
+
+- **Zero-confirmation rejection** - Never acts on unconfirmed transactions
+- **RBF detection** - Flags Bitcoin Replace-by-Fee transactions
+- **Fake token protection** - Whitelists verified contract addresses only
+- **Dust filtering** - Ignores tiny deposits below threshold
+- **Reorg detection** - Alerts when confirmed transactions disappear
+- **Amount validation** - Rejects underpaid deposits (2% tolerance)
+
+### Run Watcher Migration
+
+```sql
+source src/services/payment-engine/watcher/migrations/001_create_watcher_tables.sql
+```
+
 ## Database
 
 MySQL with tables:
@@ -103,6 +147,9 @@ MySQL with tables:
 - `rates` - Exchange rates
 - `api_keys` - API authentication
 - `audit_logs` - Security audit trail
+- `watcher_processed_transactions` - Deposit tracking (deduplication)
+- `watcher_state` - Watcher monitoring stats
+- `watcher_fraud_events` - Security events for review
 
 ### Run Security Migration
 
@@ -139,6 +186,12 @@ RATE_LIMIT_ENABLED=true
 IP_WHITELIST_ENABLED=true
 AUDIT_LOG_ENABLED=true
 HMAC_TIMESTAMP_TOLERANCE_MS=300000
+
+# Deposit Watcher (optional)
+WATCHER_ENABLED=false
+ETHERSCAN_API_KEY=
+BSCSCAN_API_KEY=
+TRONGRID_API_KEY=
 ```
 
 ## Code Style

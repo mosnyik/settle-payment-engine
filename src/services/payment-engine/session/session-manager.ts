@@ -20,6 +20,7 @@ import { lockRate } from '../rate';
 import { calculateCharges } from '../charges';
 import { assignWallet, releaseWallet } from '../wallet';
 import { SessionRepository, sessionRepository, CreateSessionData } from './session-repository';
+import { getDepositWatcher } from '../watcher';
 
 const VALID_CRYPTO_NETWORKS: Record<string, string[]> = {
   BTC: ['bitcoin'],
@@ -167,6 +168,20 @@ export class SessionManager {
 
     const session = await this.repository.create(sessionData);
 
+    // Notify deposit watcher to start monitoring this session
+    const watcher = getDepositWatcher();
+    if (watcher?.isActive()) {
+      watcher.watch({
+        sessionId: session.id,
+        depositAddress: session.depositAddress,
+        network: session.network,
+        cryptoCurrency: session.crypto,
+        expectedAmount: session.cryptoAmount,
+        walletId: session.walletId,
+        expiresAt: session.expiresAt,
+      });
+    }
+
     return session;
   }
 
@@ -280,6 +295,10 @@ export class SessionManager {
 
     await releaseWallet(session.walletId, session.network);
 
+    // Stop watching this session
+    const watcher = getDepositWatcher();
+    watcher?.unwatchSession(id);
+
     return this.repository.update(id, { status: 'expired' });
   }
 
@@ -297,6 +316,10 @@ export class SessionManager {
     if (session.status === 'pending' || session.status === 'confirming') {
       await releaseWallet(session.walletId, session.network);
     }
+
+    // Stop watching this session
+    const watcher = getDepositWatcher();
+    watcher?.unwatchSession(id);
 
     return this.repository.update(id, { status: 'failed' });
   }

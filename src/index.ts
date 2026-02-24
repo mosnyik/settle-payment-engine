@@ -11,6 +11,7 @@ import {
   ipWhitelist,
   rateLimit,
 } from './security';
+import { createDepositWatcher, WatcherConfig } from './services/payment-engine/watcher';
 
 const app = express();
 
@@ -72,6 +73,51 @@ app.listen(PORT, () => {
   console.log(`Payment Engine running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`Security: API Key + HMAC authentication enabled`);
+
+  // Start deposit watcher if enabled
+  if (config.watcher.enabled) {
+    const watcherConfig = config.watcher as WatcherConfig;
+    const watcher = createDepositWatcher(watcherConfig);
+
+    watcher.on('watcher_event', (event) => {
+      const { type, chain, sessionId, txHash, details } = event;
+      const parts = [`[Watcher] ${type}`];
+      if (chain) parts.push(`chain=${chain}`);
+      if (sessionId) parts.push(`session=${sessionId.slice(0, 8)}...`);
+      if (txHash) parts.push(`tx=${txHash.slice(0, 12)}...`);
+      if (details && Object.keys(details).length > 0) {
+        parts.push(JSON.stringify(details));
+      }
+      console.log(parts.join(' '));
+    });
+
+    watcher
+      .start()
+      .then(() => {
+        console.log(`Deposit Watcher: Ready for ${watcher.getEnabledChains().join(', ')}`);
+        console.log('Deposit Watcher: Will start polling when sessions are created');
+      })
+      .catch((err) => {
+        console.error('Failed to start Deposit Watcher:', err);
+      });
+  } else {
+    console.log('Deposit Watcher: Disabled (set WATCHER_ENABLED=true to enable)');
+  }
+});
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('Received SIGTERM, shutting down gracefully...');
+  const { stopDepositWatcher } = await import('./services/payment-engine/watcher');
+  await stopDepositWatcher();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('Received SIGINT, shutting down gracefully...');
+  const { stopDepositWatcher } = await import('./services/payment-engine/watcher');
+  await stopDepositWatcher();
+  process.exit(0);
 });
 
 export default app;

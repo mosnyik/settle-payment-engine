@@ -61,6 +61,10 @@ Sender ──[crypto]──▶ 2Settle ──[gift ID]──▶ Recipient ──
 **Use Case**: User requests payment by sharing a link. Payer fulfills with crypto.
 
 ```
+Phase 1 (Create Request):
+Requester ──[bank details + amount]──▶ 2Settle ──[request ID]──▶ Requester
+
+Phase 2 (Pay Request):
 Requester ──[request ID]──▶ Payer ──[crypto]──▶ 2Settle ──[fiat]──▶ Requester's Bank
 ```
 
@@ -235,12 +239,22 @@ CREATE TABLE merchant_settlement_accounts (
 );
 ```
 
+### Multiple Settlement Accounts
+
+Merchants can configure **multiple settlement accounts**:
+- One account per currency (NGN, GHS, KES, etc.)
+- Multiple accounts for the same currency (e.g., different banks)
+- One account marked as `is_default` per currency for automatic settlements
+- Non-default accounts can be specified per transaction via the API
+
 ### API Key Format
 
 Following the Paystack convention:
 - **Public key**: `pk_live_` + 32 random chars (used client-side, in JS SDK)
 - **Secret key**: `sk_live_` + 40 random chars (used server-side, never exposed)
 - **Test keys**: `pk_test_` / `sk_test_` for sandbox environment
+
+> **Note**: The different lengths (32 vs 40) provide more entropy for secret keys. Both could use the same length if preferred.
 
 ---
 
@@ -396,6 +410,17 @@ signature = HMAC-SHA256(keyHash, "{timestamp}|{METHOD}|{path}|{bodyHash}")
 
 > **See [SECURITY.md](./SECURITY.md) for complete authentication guide with code examples.**
 
+### API Design Notes
+
+**Reference Field**:
+- `reference` is **optional** in all endpoints
+- If omitted, the server auto-generates a unique reference (e.g., `2S-ABC123`)
+- If provided, the client's reference is used (useful for idempotency and order tracking)
+
+**Type Field**:
+- Only `/v1/payments/initialize` requires a `type` field because it's a generic endpoint that handles multiple transaction types
+- Gift endpoints (`/v1/gifts/*`) and Request endpoints (`/v1/requests/*`) have dedicated URLs, so type is implicit
+
 ### Transfer Endpoints
 
 #### Initialize Transfer Payment
@@ -404,11 +429,13 @@ signature = HMAC-SHA256(keyHash, "{timestamp}|{METHOD}|{path}|{bodyHash}")
 POST /v1/payments/initialize
 
 Headers:
-  Authorization: Bearer sk_live_xxx
+  X-API-Key: pk_live_xxxxx
+  X-Timestamp: 1708267200000
+  X-Signature: 8f4a3b2c1d...
 
 Body:
 {
-  "type": "transfer",
+  "type": "transfer",                 // Required: specifies transaction type
   "amount": 50000,                    // Fiat amount
   "currency": "NGN",
   "crypto": "USDT",                   // Optional, can be chosen on checkout
@@ -422,7 +449,7 @@ Body:
     "account_number": "1234567890",
     "account_name": "John Doe"
   },
-  "reference": "order_12345",         // Optional, auto-generated if omitted
+  "reference": "order_12345",         // Optional: client-provided or server-generated
   "callback_url": "https://merchant.com/callback",
   "metadata": {
     "order_id": "12345"

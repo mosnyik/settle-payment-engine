@@ -24,6 +24,7 @@ export {
   securityHeaders,
   auditLog,
   attachErrorForAudit,
+  adminAuth,
 } from './middleware';
 
 // Services

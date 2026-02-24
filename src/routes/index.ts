@@ -6,6 +6,7 @@ import transactionRoutes from './transaction.routes';
 import rateRoutes from './rate.routes';
 import bankRoutes from './bank.routes';
 import cryptoRoutes from './crypto.routes';
+import adminRoutes from './admin';
 
 const router = Router();
 
@@ -17,5 +18,8 @@ router.use('/transaction', transactionRoutes);
 router.use('/rate', rateRoutes);
 router.use('/banks', bankRoutes);
 router.use('/crypto', cryptoRoutes);
+
+// Admin routes (uses separate admin auth, not HMAC)
+router.use('/admin', adminRoutes);
 
 export default router;

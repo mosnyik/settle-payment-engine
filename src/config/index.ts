@@ -22,6 +22,11 @@ export const config = {
     transferPin: process.env.MONGORO_TRANSFERPIN || '',
   },
 
+  // Admin configuration
+  admin: {
+    secret: process.env.ADMIN_SECRET || '', // Required for admin endpoints
+  },
+
   // Security configuration
   security: {
     // HMAC signature settings
@@ -59,13 +64,15 @@ export const config = {
       retentionDays: parseInt(process.env.AUDIT_LOG_RETENTION_DAYS || '90', 10),
     },
 
-    // Paths that don't require authentication
+    // Paths that don't require HMAC authentication
+    // (admin routes use separate Bearer token auth)
     publicPaths: [
       '/health',
       '/rate/current',
       '/banks',
       '/banks/*',
       '/crypto/prices',
+      '/admin/*',
     ],
   },
 };

@@ -895,6 +895,172 @@ The Payment Engine uses **API Key + HMAC Signature** authentication:
 
 ---
 
+## Settlement Flow (Fiat Payout)
+
+After a crypto deposit is confirmed on-chain, the system automatically initiates fiat payout to the receiver's bank account.
+
+### Settlement Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           SETTLEMENT FLOW                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Deposit Confirmed (watcher calls confirmDeposit)                           │
+│         │                                                                   │
+│         ▼                                                                   │
+│  Status: settling (settlement in progress)                                  │
+│         │                                                                   │
+│         ▼                                                                   │
+│  Call Mongoro Transfer API                                                  │
+│         │                                                                   │
+│    ┌────┴────┐                                                              │
+│    ▼         ▼                                                              │
+│  Success   Failure                                                          │
+│    │         │                                                              │
+│    ▼         ▼                                                              │
+│  Save      Send Telegram Alert with session details                         │
+│  reference Admin manually pays & marks settled via Telegram                 │
+│    │         │                                                              │
+│    ▼         └─────────────────────────────────────────┐                    │
+│  Wait for                                              │                    │
+│  Webhook                                               ▼                    │
+│    │                                           Admin marks settled          │
+│    ┌────┴────┐                                  via /settle command         │
+│    ▼         ▼                                         │                    │
+│  Success   Reversal                                    ▼                    │
+│    │         │                                   Status: settled            │
+│    ▼         ▼                                                              │
+│  Status:   Send Telegram Alert                                              │
+│  settled   Status: settlement_reversed                                      │
+│            (needs manual resolution)                                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Settlement States
+
+| Status | Description |
+|--------|-------------|
+| `settling` | Fiat payout initiated, waiting for provider confirmation |
+| `settled` | Payout confirmed successful (via webhook or manual) |
+| `settlement_reversed` | Payout reversed after initial success (needs manual resolution) |
+
+**Important**: There is no `settlement_failed` status. If the Mongoro API call fails:
+- Session remains in `settling` status
+- Telegram alert sent to admin group with bank details
+- Admin pays manually and marks as `settled` via `/settle {reference}` command
+
+### Reversal Protection
+
+Bank transfers can appear successful but later reverse due to:
+- Account limits exceeded
+- Compliance/AML blocks
+- Insufficient funds on provider side
+- Bank rejection
+
+**Never trust initial API success**. The system implements reversal protection:
+
+1. **Initial API Success** → Status remains `settling` (NOT `settled`)
+2. **Save reference** → Track the provider transaction reference
+3. **Wait for webhook** → Only the webhook confirms final success
+4. **On webhook success** → Status becomes `settled`
+5. **On webhook failure/reversal** → Status becomes `settlement_reversed`, Telegram alert sent
+
+### Telegram Fallback
+
+When Mongoro API fails or a reversal occurs, the system sends alerts to a configured Telegram group:
+
+**API Failure Alert**:
+```
+🚨 Manual Settlement Required
+
+Session: 2S-ABC123
+Amount: ₦50,000
+Account: 1234567890
+Bank: Access Bank
+Name: John Doe
+
+Error: [error message]
+
+After manual payment, use:
+/settle 2S-ABC123
+```
+
+**Reversal Alert**:
+```
+⚠️ Settlement Reversed
+
+Session: 2S-ABC123
+Amount: ₦50,000
+Reference: MNG-XYZ789
+
+Reason: Account limit exceeded
+
+Action Required: Investigate and resolve manually.
+```
+
+### Settlement Database Schema
+
+```sql
+CREATE TABLE settlement_attempts (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  session_id VARCHAR(36) NOT NULL,
+  provider VARCHAR(50) NOT NULL DEFAULT 'mongoro',
+  reference VARCHAR(100) NULL,
+  status ENUM('pending', 'success', 'failed', 'reversed') NOT NULL,
+  amount DECIMAL(15,2) NOT NULL,
+  account_number VARCHAR(20) NOT NULL,
+  bank_code VARCHAR(10) NOT NULL,
+  account_name VARCHAR(100) NOT NULL,
+  request_payload JSON NULL,
+  response_payload JSON NULL,
+  error_message TEXT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  INDEX idx_session (session_id),
+  INDEX idx_reference (reference),
+  INDEX idx_status (status),
+  FOREIGN KEY (session_id) REFERENCES payment_sessions(id)
+);
+```
+
+### Configuration
+
+```env
+# Settlement Provider
+SETTLEMENT_ENABLED=true
+MONGORO_API_URL=https://api-biz-dev.mongoro.com/api/v1/openapi
+MONGORO_TOKEN=your_token
+MONGORO_TRANSFERPIN=your_pin
+MONGORO_CALLBACK_URL=https://yourapp.com/webhooks/mongoro
+
+# Telegram Alerts
+TELEGRAM_ALERTS_ENABLED=true
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+```
+
+### Webhook Endpoint
+
+```
+POST /webhooks/mongoro
+```
+
+Receives status updates from Mongoro after transfer completion or failure.
+
+### Manual Settlement Endpoint
+
+```
+POST /admin/sessions/:reference/settle
+Authorization: Bearer <ADMIN_SECRET>
+```
+
+Called by the Telegram bot when admin uses `/settle {reference}` command after manual payment.
+
+---
+
 ## Key Metrics to Track
 
 - Payment conversion rate by type (created → settled)

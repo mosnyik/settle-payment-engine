@@ -18,7 +18,8 @@ export type PaymentStatus =
   | 'settling'
   | 'settled'
   | 'expired'
-  | 'failed';
+  | 'failed'
+  | 'settlement_reversed';
 
 export type CryptoCurrency = 'BTC' | 'ETH' | 'BNB' | 'TRX' | 'USDT';
 

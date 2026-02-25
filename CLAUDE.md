@@ -33,6 +33,7 @@ src/
 │   │   ├── rate/               # Rate service
 │   │   ├── charges/            # Fee calculation
 │   │   ├── watcher/            # Deposit watcher (blockchain monitoring)
+│   │   ├── settlement/         # Fiat payout (Mongoro + Telegram fallback)
 │   │   └── types.ts            # Type definitions
 │   └── transaction/            # Transaction persistence
 ├── security/                   # Security module
@@ -138,6 +139,44 @@ TRONGRID_API_KEY=your_key  # Optional but recommended
 source src/services/payment-engine/watcher/migrations/001_create_watcher_tables.sql
 ```
 
+## Settlement (Fiat Payout)
+
+Automatic fiat payout to receiver's bank account after deposit is confirmed.
+
+### Flow
+
+1. Deposit confirmed → Settlement triggered automatically
+2. Mongoro API called for bank transfer
+3. Success → Wait for webhook confirmation → `settled`
+4. Failure → Telegram alert → Admin pays manually → `/settle {ref}` → `settled`
+
+### Settlement States
+
+- `settling` - Payout initiated, waiting for confirmation
+- `settled` - Payout confirmed successful
+- `settlement_reversed` - Payout reversed after initial success (needs manual resolution)
+
+### Configuration
+
+```env
+SETTLEMENT_ENABLED=true
+MONGORO_CALLBACK_URL=https://yourapp.com/webhooks/mongoro
+TELEGRAM_ALERTS_ENABLED=true
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+```
+
+### Endpoints
+
+- `POST /webhooks/mongoro` - Receives Mongoro status updates
+- `POST /admin/sessions/:reference/settle` - Mark session as settled after manual payment
+
+### Run Settlement Migration
+
+```sql
+source src/services/payment-engine/settlement/migrations/001_create_settlement_tables.sql
+```
+
 ## Database
 
 MySQL with tables:
@@ -150,6 +189,7 @@ MySQL with tables:
 - `watcher_processed_transactions` - Deposit tracking (deduplication)
 - `watcher_state` - Watcher monitoring stats
 - `watcher_fraud_events` - Security events for review
+- `settlement_attempts` - Fiat payout audit trail
 
 ### Run Security Migration
 

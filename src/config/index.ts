@@ -59,6 +59,23 @@ export const config = {
     transferPin: process.env.MONGORO_TRANSFERPIN || '',
   },
 
+  // Settlement (Fiat Payout) configuration
+  settlement: {
+    enabled: process.env.SETTLEMENT_ENABLED === 'true',
+    provider: 'mongoro' as const,
+    mongoro: {
+      baseUrl: process.env.MONGORO_API_URL || 'https://api-biz-dev.mongoro.com/api/v1/openapi',
+      token: process.env.MONGORO_TOKEN || '',
+      transferPin: process.env.MONGORO_TRANSFERPIN || '',
+      callbackUrl: process.env.MONGORO_CALLBACK_URL || '',
+    },
+    telegram: {
+      enabled: process.env.TELEGRAM_ALERTS_ENABLED === 'true',
+      botToken: process.env.TELEGRAM_BOT_TOKEN || '',
+      chatId: process.env.TELEGRAM_CHAT_ID || '',
+    },
+  },
+
   // Admin configuration
   admin: {
     secret: process.env.ADMIN_SECRET || '', // Required for admin endpoints
@@ -102,7 +119,7 @@ export const config = {
     },
 
     // Paths that don't require HMAC authentication
-    // (admin routes use separate Bearer token auth)
+    // (admin routes use separate Bearer token auth, webhooks use provider signatures)
     publicPaths: [
       '/health',
       '/rate/current',
@@ -110,6 +127,7 @@ export const config = {
       '/banks/*',
       '/crypto/prices',
       '/admin/*',
+      '/webhooks/*',
     ],
   },
 };

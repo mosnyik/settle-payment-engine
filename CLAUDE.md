@@ -29,7 +29,9 @@ src/
 │   ├── payment-engine/         # Core payment engine
 │   │   ├── payment-engine.ts   # Main facade
 │   │   ├── session/            # Session management
-│   │   ├── wallet/             # Wallet pool
+│   │   ├── wallet/             # Wallet pool (deprecated when HD enabled)
+│   │   ├── hd-wallet/          # HD wallet derivation (planned)
+│   │   ├── sweeper/            # Fund sweeper to hot wallet (planned)
 │   │   ├── rate/               # Rate service
 │   │   ├── charges/            # Fee calculation
 │   │   ├── watcher/            # Deposit watcher (blockchain monitoring)
@@ -48,7 +50,8 @@ src/
     ├── DESIGN.md               # System design
     ├── ARCHITECTURE.md         # Architecture diagrams
     ├── SECURITY.md             # Security integration guide
-    └── IMPLEMENTATION.md       # Implementation details
+    ├── IMPLEMENTATION.md       # Implementation details
+    └── HD_WALLET_DESIGN.md     # HD wallet & sweeper design (planned)
 ```
 
 ## Security Model
@@ -177,11 +180,51 @@ TELEGRAM_CHAT_ID=your_chat_id
 source src/services/payment-engine/settlement/migrations/001_create_settlement_tables.sql
 ```
 
+## HD Wallet (Planned)
+
+> **Status**: Implementation pending. See `src/docs/HD_WALLET_DESIGN.md` for full design.
+
+Replacing the static wallet pool with HD (Hierarchical Deterministic) wallet derivation:
+
+- **Unlimited addresses** - No pool exhaustion, each payment gets unique address
+- **On-the-fly derivation** - Addresses derived from master seed as needed
+- **Automatic sweeping** - Funds consolidated to hot wallet after deposit confirmation
+
+### Derivation Paths
+
+| Chain | Path | Networks |
+|-------|------|----------|
+| Bitcoin | `m/84'/0'/0'/0/{index}` | bitcoin |
+| Ethereum | `m/44'/60'/0'/0/{index}` | ethereum, bsc, polygon, base, erc20, bep20 |
+| Tron | `m/44'/195'/0'/0/{index}` | tron, trc20 |
+
+### Planned Configuration
+
+```env
+HD_WALLET_ENABLED=true
+HD_SEED_PHRASE_ENCRYPTED=<AES-256 encrypted mnemonic>
+HD_SEED_ENCRYPTION_KEY=<32-byte hex key>
+
+# Hot wallets (sweep destinations)
+HOT_WALLET_BITCOIN=bc1q...
+HOT_WALLET_ETHEREUM=0x...
+HOT_WALLET_TRON=T...
+
+# Sweeper
+SWEEPER_ENABLED=true
+```
+
+### New Tables (after migration)
+
+- `hd_wallet_config` - Derivation state per chain
+- `derived_addresses` - Audit trail of all derived addresses
+- `sweep_transactions` - Sweep operation audit trail
+
 ## Database
 
 MySQL with tables:
 - `payment_sessions` - Transaction state
-- `wallets` - Wallet pool with per-chain flags
+- `wallets` - Wallet pool with per-chain flags (deprecated when HD wallet enabled)
 - `payers`, `receivers` - Participant details
 - `rates` - Exchange rates
 - `api_keys` - API authentication

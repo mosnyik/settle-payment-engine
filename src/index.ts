@@ -12,6 +12,8 @@ import {
   rateLimit,
 } from './security';
 import { createDepositWatcher, WatcherConfig } from './services/payment-engine/watcher';
+import dotenv from "dotenv";
+dotenv.config();
 
 const app = express();
 

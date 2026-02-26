@@ -1,6 +1,6 @@
-import { Router, Request, Response, NextFunction } from 'express';
-import pool from '../lib/mysql';
-import { RowDataPacket } from 'mysql2/promise';
+import { Router, Request, Response, NextFunction } from "express";
+import pool from "../lib/mysql";
+import { RowDataPacket } from "mysql2/promise";
 
 const router = Router();
 
@@ -11,12 +11,12 @@ interface ExchangeRate extends RowDataPacket {
 }
 
 // GET /rate
-router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const [results] = await pool.execute<ExchangeRate[]>('SELECT * FROM rates');
+    const [results] = await pool.execute<ExchangeRate[]>("SELECT * FROM rates");
 
     if (!results || results.length === 0) {
-      return res.status(404).json({ error: 'No rates found' });
+      return res.status(404).json({ error: "No rates found" });
     }
 
     const result = results[0];
@@ -30,44 +30,68 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
     return res.status(200).json({ rate: data });
   } catch (err: any) {
-    console.error('Error querying the rate from rates:', err);
+    console.error("Error querying the rate from rates:", err);
     next(err);
   }
 });
 
 // GET /rate/merchant
-router.get('/merchant', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const [results] = await pool.query<ExchangeRate[]>('SELECT * FROM rates');
+router.get(
+  "/merchant",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const [results] = await pool.query<ExchangeRate[]>("SELECT * FROM rates");
 
-    if (!results || results.length === 0) {
-      return res.status(404).json({ error: 'No rates found' });
+      if (!results || results.length === 0) {
+        return res.status(404).json({ error: "No rates found" });
+      }
+
+      const result = results[0];
+      const merchantRate = result.merchant_rate;
+
+      return res.status(200).json({ merchantRate });
+    } catch (err: any) {
+      console.error("Error querying the merchant rate from rates:", err);
+      next(err);
     }
+  },
+);
+// GET /rate/profit
+router.get(
+  "/profit",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const [results] = await pool.query<ExchangeRate[]>("SELECT * FROM rates");
 
-    const result = results[0];
-    const merchantRate = result.merchant_rate;
+      if (!results || results.length === 0) {
+        return res.status(404).json({ error: "No rates found" });
+      }
 
-    return res.status(200).json({ merchantRate });
-  } catch (err: any) {
-    console.error('Error querying the merchant rate from rates:', err);
-    next(err);
-  }
-});
+      const result = results[0];
+      const profitRate = result.profit_rate;
+
+      return res.status(200).json({ profitRate });
+    } catch (err: any) {
+      console.error("Error querying the profit rate from rates:", err);
+      next(err);
+    }
+  },
+);
 
 // GET /rate/all
-router.get('/all', async (req: Request, res: Response, next: NextFunction) => {
+router.get("/all", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const [results] = await pool.query<ExchangeRate[]>('SELECT * FROM rates');
+    const [results] = await pool.query<ExchangeRate[]>("SELECT * FROM rates");
 
     if (!results || results.length === 0) {
-      return res.status(404).json({ error: 'No rates found' });
+      return res.status(404).json({ error: "No rates found" });
     }
 
     const result = results[0];
 
     const parseRate = (value: string | number): number => {
-      if (typeof value === 'number') return value;
-      return parseFloat(value.toString().replace(/,/g, ''));
+      if (typeof value === "number") return value;
+      return parseFloat(value.toString().replace(/,/g, ""));
     };
 
     const currentRate = parseRate(result.current_rate);
@@ -86,7 +110,7 @@ router.get('/all', async (req: Request, res: Response, next: NextFunction) => {
       profitRate,
     });
   } catch (err: any) {
-    console.error('Error querying rates:', err);
+    console.error("Error querying rates:", err);
     next(err);
   }
 });

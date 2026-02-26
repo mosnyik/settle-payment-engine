@@ -1,20 +1,30 @@
-# Payment Engine Architecture
+   # Payment Engine Architecture
 
 This document provides detailed diagrams of the payment engine's architecture and flows for all three transaction types: Transfer, Gift, and Request.
 
 ## Table of Contents
 
-1. [System Architecture](#system-architecture)
-2. [Component Diagram](#component-diagram)
-3. [Transaction Type Flows](#transaction-type-flows)
-   - [Transfer Flow](#transfer-flow)
-   - [Gift Flow (Create + Claim)](#gift-flow)
-   - [Request Flow (Create + Pay)](#request-flow)
-4. [Session State Machine](#session-state-machine)
-5. [Wallet Pool Flow](#wallet-pool-flow)
-6. [Rate Locking Flow](#rate-locking-flow)
-7. [Database Schema](#database-schema)
-8. [Integration Points](#integration-points)
+- [Payment Engine Architecture](#payment-engine-architecture)
+  - [Table of Contents](#table-of-contents)
+  - [System Architecture](#system-architecture)
+    - [High-Level Overview](#high-level-overview)
+  - [Component Diagram](#component-diagram)
+    - [Module Dependencies](#module-dependencies)
+  - [Transaction Type Flows](#transaction-type-flows)
+    - [Transfer Flow](#transfer-flow)
+    - [Gift Flow](#gift-flow)
+    - [Request Flow](#request-flow)
+  - [Session State Machine](#session-state-machine)
+    - [Transition Table by Type](#transition-table-by-type)
+  - [Wallet Pool Flow](#wallet-pool-flow)
+    - [When Wallet is Assigned (by Transaction Type)](#when-wallet-is-assigned-by-transaction-type)
+    - [Wallet Release Timing](#wallet-release-timing)
+  - [Rate Locking Flow](#rate-locking-flow)
+    - [When Rate is Locked (by Transaction Type)](#when-rate-is-locked-by-transaction-type)
+  - [Database Schema](#database-schema)
+    - [Key Schema Differences by Type](#key-schema-differences-by-type)
+  - [Integration Points](#integration-points)
+    - [How Different Clients Use the Engine](#how-different-clients-use-the-engine)
 
 ---
 

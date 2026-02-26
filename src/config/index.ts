@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const config = {
-  port: parseInt(process.env.PORT || '3001', 10),
+  port: parseInt(process.env.PORT || '3500', 10),
 
   // Deposit Watcher configuration
   watcher: {
@@ -58,6 +58,8 @@ export const config = {
     token: process.env.MONGORO_TOKEN || '',
     transferPin: process.env.MONGORO_TRANSFERPIN || '',
   },
+
+  nubanApiKey: process.env.NUBAN_API_KEY || '',
 
   // Settlement (Fiat Payout) configuration
   settlement: {
@@ -122,10 +124,9 @@ export const config = {
     // (admin routes use separate Bearer token auth, webhooks use provider signatures)
     publicPaths: [
       '/health',
-      '/rate/current',
-      '/banks',
-      '/banks/*',
-      '/crypto/prices',
+      '/rate/*',
+      '/banks/list',
+      // '/crypto/price',
       '/admin/*',
       '/webhooks/*',
     ],

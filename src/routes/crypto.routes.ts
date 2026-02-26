@@ -1,8 +1,26 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import axios from 'axios';
+import { RowDataPacket } from 'mysql2/promise';
 import config from '../config';
+import pool from '../lib/mysql';
 
 const router = Router();
+
+interface ExchangeRate extends RowDataPacket {
+  current_rate: string | number;
+}
+
+async function getCurrentRate(): Promise<number> {
+  const [results] = await pool.execute<ExchangeRate[]>('SELECT current_rate FROM rates LIMIT 1');
+  if (!results || results.length === 0) {
+    throw new Error('No rate found');
+  }
+  const raw = results[0].current_rate;
+  const numRate = typeof raw === 'number' ? raw : parseFloat(raw.toString().replace(/,/g, ''));
+  const percentage = 0.8;
+  const adjustment = (percentage / 100) * numRate;
+  return numRate - adjustment;
+}
 
 // Helper to get base symbol (e.g., USDT-BEP20 -> USDT)
 function getBaseSymbol(ticker: string): string {
@@ -34,9 +52,10 @@ router.get('/price', async (req: Request, res: Response, next: NextFunction) => 
 
     ticker = getBaseSymbol(ticker);
 
-    // USDT is pegged to $1
-    if (ticker === 'USDT') {
-      return res.status(200).json({ price: 1 });
+    // USDT/USDC - return current exchange rate
+    if (ticker === 'USDT' || ticker === 'USDC') {
+      const rate = await getCurrentRate();
+      return res.status(200).json({ price: rate });
     }
 
     const response = await axios.get(
@@ -76,9 +95,10 @@ router.post('/price', async (req: Request, res: Response, next: NextFunction) =>
 
     ticker = getBaseSymbol(ticker);
 
-    // USDT is pegged to $1
-    if (ticker === 'USDT') {
-      return res.status(200).json({ price: 1 });
+    // USDT/USDC - return current exchange rate
+    if (ticker === 'USDT' || ticker === 'USDC') {
+      const rate = await getCurrentRate();
+      return res.status(200).json({ price: rate });
     }
 
     const response = await axios.get(

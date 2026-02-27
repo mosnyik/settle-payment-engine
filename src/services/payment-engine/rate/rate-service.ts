@@ -91,7 +91,7 @@ async function fetchExchangeRateFromDb(fiatCurrency: FiatCurrency): Promise<Rate
     };
 
     const currentRate = parseRate(rateRow.current_rate);
-    const merchantRate = parseRate(rateRow.merchant_rate || rateRow.current_rate);
+    const merchantRate = parseRate(rateRow.merchant_rate || 0);
     const profitRate = parseRate(rateRow.profit_rate || 0);
 
     // Apply 0.8% adjustment

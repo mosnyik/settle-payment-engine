@@ -6,7 +6,13 @@
 
 import config from '../../../config';
 import { TelegramAlertConfig } from './types';
-import { PaymentSession } from '../types';
+
+/** Minimal session data needed for telegram alerts */
+export interface SessionAlertData {
+  reference: string;
+  fiatAmount: number;
+  fiatCurrency: string;
+}
 
 export class TelegramService {
   private readonly config: TelegramAlertConfig;
@@ -68,7 +74,7 @@ export class TelegramService {
    * Send alert for settlement API failure
    */
   async sendSettlementFailureAlert(
-    session: PaymentSession,
+    session: SessionAlertData,
     receiver: { accountNumber: string; bankCode: string; accountName: string; bankName?: string },
     error: string
   ): Promise<boolean> {
@@ -80,7 +86,7 @@ export class TelegramService {
    * Send alert for settlement reversal
    */
   async sendSettlementReversalAlert(
-    session: PaymentSession,
+    session: SessionAlertData,
     reference: string,
     reason: string
   ): Promise<boolean> {
@@ -92,7 +98,7 @@ export class TelegramService {
    * Format settlement failure message
    */
   formatSettlementFailure(
-    session: PaymentSession,
+    session: SessionAlertData,
     receiver: { accountNumber: string; bankCode: string; accountName: string; bankName?: string },
     error: string
   ): string {
@@ -119,7 +125,7 @@ After manual payment, use:
    * Format settlement reversal message
    */
   formatSettlementReversal(
-    session: PaymentSession,
+    session: SessionAlertData,
     reference: string,
     reason: string
   ): string {

@@ -12,6 +12,8 @@ import {
   rateLimit,
 } from './security';
 import { createDepositWatcher, WatcherConfig } from './services/payment-engine/watcher';
+import { createHDWalletService, destroyHDWalletService } from './services/payment-engine/hd-wallet';
+import { createSweeperService, destroySweeperService, SweeperConfig } from './services/payment-engine/sweeper';
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -51,12 +53,12 @@ app.use(rateLimit);
 // =============================================================================
 
 // Health check (public, no auth required)
-app.get('/health', (req: Request, res: Response) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get("/v1/health", (req: Request, res: Response) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 // API routes
-app.use('/', routes);
+app.use("/v1", routes);
 
 // =============================================================================
 // ERROR HANDLING
@@ -71,10 +73,45 @@ app.use(errorHandler);
 
 const PORT = config.port;
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Payment Engine running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`Security: API Key + HMAC authentication enabled`);
+
+  // Initialize HD Wallet if enabled
+  if (config.hdWallet.enabled) {
+    try {
+      await createHDWalletService(
+        config.hdWallet.seedEncrypted,
+        config.hdWallet.seedEncryptionKey,
+        config.hdWallet.hotWallets
+      );
+      console.log('HD Wallet: Initialized');
+    } catch (err) {
+      console.error('HD Wallet: Failed to initialize:', err);
+    }
+  } else {
+    console.log('HD Wallet: Disabled (set HD_WALLET_ENABLED=true to enable)');
+  }
+
+  // Initialize Sweeper if enabled
+  if (config.sweeper.enabled && config.hdWallet.enabled) {
+    try {
+      const sweeperConfig: SweeperConfig = {
+        enabled: config.sweeper.enabled,
+        maxRetries: config.sweeper.maxRetries,
+        hotWallets: config.hdWallet.hotWallets,
+        rpc: config.sweeper.rpc,
+        thresholds: config.sweeper.thresholds,
+      };
+      await createSweeperService(sweeperConfig);
+      console.log('Sweeper: Initialized');
+    } catch (err) {
+      console.error('Sweeper: Failed to initialize:', err);
+    }
+  } else {
+    console.log('Sweeper: Disabled (requires HD_WALLET_ENABLED=true and SWEEPER_ENABLED=true)');
+  }
 
   // Start deposit watcher if enabled
   if (config.watcher.enabled) {
@@ -112,6 +149,8 @@ process.on('SIGTERM', async () => {
   console.log('Received SIGTERM, shutting down gracefully...');
   const { stopDepositWatcher } = await import('./services/payment-engine/watcher');
   await stopDepositWatcher();
+  destroySweeperService();
+  destroyHDWalletService();
   process.exit(0);
 });
 
@@ -119,6 +158,8 @@ process.on('SIGINT', async () => {
   console.log('Received SIGINT, shutting down gracefully...');
   const { stopDepositWatcher } = await import('./services/payment-engine/watcher');
   await stopDepositWatcher();
+  destroySweeperService();
+  destroyHDWalletService();
   process.exit(0);
 });
 

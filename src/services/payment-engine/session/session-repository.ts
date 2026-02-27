@@ -9,6 +9,7 @@ import {
   CryptoCurrency,
   Network,
   FiatCurrency,
+  HDChain,
 } from '../types';
 import { SessionNotFoundError, DatabaseError } from '../errors';
 
@@ -27,7 +28,9 @@ export interface CreateSessionData {
   chargeAmount: number;
   chargeCrypto: number;
   depositAddress: string;
-  walletId: number;
+  walletId?: number; // Deprecated: use derivationIndex
+  derivationIndex?: number; // HD wallet derivation index
+  hdChain?: HDChain; // HD wallet chain
   payerChatId: string;
   payerId?: number;
   receiverId?: number;
@@ -66,7 +69,9 @@ function rowToSession(row: any): PaymentSession {
     chargeAmount: Number(row.charge_amount),
     chargeCrypto: Number(row.charge_crypto),
     depositAddress: row.deposit_address,
-    walletId: Number(row.wallet_id),
+    walletId: row.wallet_id ? Number(row.wallet_id) : undefined,
+    derivationIndex: row.derivation_index ? Number(row.derivation_index) : undefined,
+    hdChain: row.hd_chain as HDChain | undefined,
     payerId: row.payer_id ? Number(row.payer_id) : undefined,
     payerChatId: row.payer_chat_id,
     receiverId: row.receiver_id ? Number(row.receiver_id) : undefined,
@@ -96,11 +101,11 @@ export class SessionRepository {
           fiat_amount, fiat_currency, crypto_amount, crypto_currency, network,
           rate, asset_price, rate_locked_at,
           charge_amount, charge_crypto,
-          deposit_address, wallet_id,
+          deposit_address, wallet_id, derivation_index, hd_chain,
           payer_chat_id, payer_id, receiver_id, merchant_id,
           expires_at, created_at, updated_at,
           metadata
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.id,
           data.reference,
@@ -117,7 +122,9 @@ export class SessionRepository {
           data.chargeAmount,
           data.chargeCrypto,
           data.depositAddress,
-          data.walletId,
+          data.walletId || null,
+          data.derivationIndex || null,
+          data.hdChain || null,
           data.payerChatId,
           data.payerId || null,
           data.receiverId || null,

@@ -6,7 +6,7 @@
  */
 
 import { mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { decryptAES256 } from '../../../utils/crypto';
 import { getDerivation } from './derivation';
 import {

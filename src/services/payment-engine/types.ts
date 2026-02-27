@@ -21,7 +21,7 @@ export type PaymentStatus =
   | 'failed'
   | 'settlement_reversed';
 
-export type CryptoCurrency = 'BTC' | 'ETH' | 'BNB' | 'TRX' | 'USDT';
+export type CryptoCurrency = 'BTC' | 'ETH' | 'BNB' | 'TRX' | 'USDT' | 'USDC';
 
 export type Network =
   | 'bitcoin'
@@ -90,6 +90,9 @@ export interface RateLock {
   expiresAt: Date;
 }
 
+/** HD wallet chain types */
+export type HDChain = 'bitcoin' | 'ethereum' | 'tron';
+
 export interface PaymentSession {
   id: string;
   reference: string;
@@ -106,7 +109,9 @@ export interface PaymentSession {
   chargeAmount: number;
   chargeCrypto: number;
   depositAddress: string;
-  walletId: number;
+  walletId?: number; // Deprecated: use derivationIndex
+  derivationIndex?: number; // HD wallet derivation index
+  hdChain?: HDChain; // HD wallet chain
   payerId?: number;
   payerChatId: string;
   receiverId?: number;

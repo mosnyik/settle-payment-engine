@@ -4,7 +4,7 @@
  * Type definitions for the blockchain deposit monitoring system.
  */
 
-import { Network, CryptoCurrency } from '../types';
+import { Network, CryptoCurrency, HDChain } from '../types';
 
 // =============================================================================
 // CHAIN TYPES
@@ -115,7 +115,9 @@ export interface WatchedSession {
   chain: WatchableChain;
   cryptoCurrency: CryptoCurrency;
   expectedAmount: number;
-  walletId: number;
+  walletId?: number; // Deprecated: use derivationIndex
+  derivationIndex?: number; // HD wallet derivation index
+  hdChain?: HDChain; // HD wallet chain (for sweeper)
   status: 'pending' | 'confirming';
   txHash?: string;
   expiresAt: Date;

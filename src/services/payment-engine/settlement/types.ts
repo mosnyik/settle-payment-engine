@@ -32,14 +32,14 @@ export interface MongoroTransferResponse {
   success: boolean;
   message: string;
   data?: {
-    reference: string;
-    status: string;
-    amount: number;
-    fee: number;
-    narration: string;
-    destinationAccountName: string;
-    destinationBankName: string;
-    destinationAccountNumber: string;
+    reference?: string;
+    status?: string;
+    amount?: number;
+    fee?: number;
+    narration?: string;
+    destinationAccountName?: string;
+    destinationBankName?: string;
+    destinationAccountNumber?: string;
     sessionId?: string;
   };
 }

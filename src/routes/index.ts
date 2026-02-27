@@ -7,14 +7,32 @@ import rateRoutes from './rate.routes';
 import bankRoutes from './bank.routes';
 import cryptoRoutes from './crypto.routes';
 import adminRoutes from './admin';
+import paymentRoutes from './payment.routes';
+import {
+  deprecateTransferRoutes,
+  deprecateGiftRoutes,
+  deprecateRequestRoutes,
+  deprecateTransactionRoutes,
+} from '../middleware/deprecation';
 
 const router = Router();
 
-// Mount all routes
-router.use('/transfer', transferRoutes);
-router.use('/gifts', giftRoutes);
-router.use('/requests', requestRoutes);
-router.use('/transaction', transactionRoutes);
+// =============================================================================
+// NEW UNIFIED ROUTES (preferred)
+// =============================================================================
+router.use('/payments', paymentRoutes);
+
+// =============================================================================
+// LEGACY ROUTES (deprecated - use /payments instead)
+// =============================================================================
+router.use('/transfer', deprecateTransferRoutes, transferRoutes);
+router.use('/gifts', deprecateGiftRoutes, giftRoutes);
+router.use('/requests', deprecateRequestRoutes, requestRoutes);
+router.use('/transaction', deprecateTransactionRoutes, transactionRoutes);
+
+// =============================================================================
+// OTHER ROUTES
+// =============================================================================
 router.use('/rate', rateRoutes);
 router.use('/banks', bankRoutes);
 router.use('/crypto', cryptoRoutes);

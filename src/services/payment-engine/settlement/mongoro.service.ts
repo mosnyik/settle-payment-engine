@@ -11,6 +11,27 @@ import {
   MongoroTransferResponse,
 } from './types';
 
+/** Mongoro API response shape */
+interface MongoroApiResponse {
+  success?: boolean;
+  message?: string;
+  reference?: string;
+  status?: string;
+  data?: {
+    reference?: string;
+    status?: string;
+    amount?: number;
+    fee?: number;
+    narration?: string;
+    destinationAccountName?: string;
+    destinationBankName?: string;
+    destinationAccountNumber?: string;
+    sessionId?: string;
+    accountName?: string;
+  };
+  accountName?: string;
+}
+
 export class MongoroService {
   private readonly config: MongoroConfig;
 
@@ -70,7 +91,7 @@ export class MongoroService {
         body: JSON.stringify(request),
       });
 
-      const data = await response.json();
+      const data = await response.json() as MongoroApiResponse;
 
       if (!response.ok) {
         return {
@@ -138,7 +159,7 @@ export class MongoroService {
         },
       });
 
-      const data = await response.json();
+      const data = await response.json() as MongoroApiResponse;
 
       if (!response.ok) {
         return {
@@ -194,7 +215,7 @@ export class MongoroService {
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json() as MongoroApiResponse;
 
       if (!response.ok || data.success === false) {
         return {

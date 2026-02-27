@@ -83,6 +83,38 @@ export const config = {
     secret: process.env.ADMIN_SECRET || '', // Required for admin endpoints
   },
 
+  // HD Wallet configuration
+  hdWallet: {
+    enabled: process.env.HD_WALLET_ENABLED === 'true',
+    seedEncrypted: process.env.HD_SEED_PHRASE_ENCRYPTED || '',
+    seedEncryptionKey: process.env.HD_SEED_ENCRYPTION_KEY || '',
+    hotWallets: {
+      bitcoin: process.env.HOT_WALLET_BITCOIN || '',
+      ethereum: process.env.HOT_WALLET_ETHEREUM || '',
+      tron: process.env.HOT_WALLET_TRON || '',
+    },
+  },
+
+  // Sweeper configuration
+  sweeper: {
+    enabled: process.env.SWEEPER_ENABLED === 'true',
+    maxRetries: parseInt(process.env.SWEEPER_MAX_RETRIES || '3', 10),
+    rpc: {
+      ethereum: process.env.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com',
+      bsc: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org',
+      polygon: process.env.POLYGON_RPC_URL || '',
+      base: process.env.BASE_RPC_URL || '',
+    },
+    thresholds: {
+      BTC: parseFloat(process.env.SWEEP_MIN_BTC || '0.0001'),
+      ETH: parseFloat(process.env.SWEEP_MIN_ETH || '0.001'),
+      BNB: parseFloat(process.env.SWEEP_MIN_BNB || '0.01'),
+      TRX: parseFloat(process.env.SWEEP_MIN_TRX || '10'),
+      USDT: parseFloat(process.env.SWEEP_MIN_USDT || '1'),
+      USDC: parseFloat(process.env.SWEEP_MIN_USDC || '1'),
+    },
+  },
+
   // Security configuration
   security: {
     // HMAC signature settings
@@ -123,12 +155,12 @@ export const config = {
     // Paths that don't require HMAC authentication
     // (admin routes use separate Bearer token auth, webhooks use provider signatures)
     publicPaths: [
-      '/health',
-      '/rate/*',
-      '/banks/list',
-      // '/crypto/price',
-      '/admin/*',
-      '/webhooks/*',
+      '/v1/health',
+      '/v1/rate/*',
+      '/v1/banks/list',
+      //v1/ '/crypto/price',
+      '/v1/admin/*',
+      '/v1/webhooks/*',
     ],
   },
 };

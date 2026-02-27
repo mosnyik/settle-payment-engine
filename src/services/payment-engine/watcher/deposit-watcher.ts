@@ -7,7 +7,8 @@
 
 import { EventEmitter } from 'events';
 import { sessionManager } from '../session';
-import { Network, CryptoCurrency } from '../types';
+import { Network, CryptoCurrency, HDChain } from '../types';
+import { getSweeperService } from '../sweeper';
 import {
   WatcherConfig,
   WatchedSession,
@@ -192,7 +193,9 @@ export class DepositWatcher extends EventEmitter {
     network: Network;
     cryptoCurrency: CryptoCurrency;
     expectedAmount: number;
-    walletId: number;
+    walletId?: number; // Deprecated: use derivationIndex
+    derivationIndex?: number; // HD wallet derivation index
+    hdChain?: HDChain; // HD wallet chain (for sweeper)
     expiresAt: Date;
   }): void {
     const chain = NETWORK_TO_WATCHABLE_CHAIN[params.network];
@@ -205,6 +208,8 @@ export class DepositWatcher extends EventEmitter {
       cryptoCurrency: params.cryptoCurrency,
       expectedAmount: params.expectedAmount,
       walletId: params.walletId,
+      derivationIndex: params.derivationIndex,
+      hdChain: params.hdChain,
       status: 'pending',
       expiresAt: params.expiresAt,
     };
@@ -459,6 +464,31 @@ export class DepositWatcher extends EventEmitter {
           `[DepositWatcher] Deposit confirmed for session ${session.id.slice(0, 8)}...: ` +
             `${tx.confirmations} confirmations`
         );
+
+        // Trigger sweeper for HD wallet sessions (non-blocking)
+        if (session.derivationIndex !== undefined && session.hdChain) {
+          const sweeper = getSweeperService();
+          if (sweeper?.isEnabled()) {
+            sweeper.sweep({
+              sessionId: session.id,
+              chain: session.hdChain,
+              network: session.network,
+              fromAddress: session.depositAddress,
+              derivationIndex: session.derivationIndex,
+              amount: tx.amountDecimal.toString(),
+              cryptoCurrency: session.cryptoCurrency,
+              tokenContract: tx.tokenAddress,
+            }).then(result => {
+              if (result.success) {
+                console.log(`[DepositWatcher] Sweep initiated for session ${session.id.slice(0, 8)}...: ${result.txHash}`);
+              } else {
+                console.warn(`[DepositWatcher] Sweep failed for session ${session.id.slice(0, 8)}...: ${result.error}`);
+              }
+            }).catch(err => {
+              console.error(`[DepositWatcher] Sweep error for session ${session.id.slice(0, 8)}...:`, err.message);
+            });
+          }
+        }
 
         // Stop watching this session
         this.unwatchSession(session.id);

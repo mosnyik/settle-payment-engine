@@ -6,10 +6,9 @@
  */
 
 import config from '../../../config';
-import { pool } from '../../../lib/db';
-import { PaymentSession } from '../types';
+import { pool } from '../../../lib/mysql';
 import { MongoroService, mongoroService } from './mongoro.service';
-import { TelegramService, telegramService } from './telegram.service';
+import { TelegramService, telegramService, SessionAlertData } from './telegram.service';
 import {
   SettlementConfig,
   SettlementAttempt,
@@ -24,6 +23,13 @@ interface ReceiverRow extends RowDataPacket {
   account_number: string;
   account_name: string;
   bank_name?: string;
+}
+
+interface ReceiverData {
+  accountNumber: string;
+  bankCode: string;
+  accountName: string;
+  bankName?: string;
 }
 
 interface SessionRow extends RowDataPacket {
@@ -80,7 +86,7 @@ export class SettlementService {
     }
 
     // 2. Get receiver bank details
-    const receiver = await this.getReceiver(session.receiverId);
+    const receiver = await this.getReceiver(session.receiver_id);
     if (!receiver) {
       console.error(`[Settlement] No receiver for session ${sessionId}`);
       await this.handleSettlementFailure(
@@ -99,7 +105,7 @@ export class SettlementService {
       sessionId,
       provider: 'mongoro',
       status: 'pending',
-      amount: session.fiatAmount,
+      amount: session.fiat_amount,
       accountNumber: receiver.accountNumber,
       bankCode: receiver.bankCode,
       accountName: receiver.accountName,
@@ -114,9 +120,9 @@ export class SettlementService {
       receiver.bankCode,
       receiver.bankName || receiver.bankCode,
       receiver.accountName,
-      session.fiatAmount,
+      session.fiat_amount,
       narration,
-      session.fiatCurrency
+      session.fiat_currency
     );
 
     // 6. Handle response
@@ -147,21 +153,18 @@ export class SettlementService {
    * Handle settlement failure - send Telegram alert or mark as failed
    */
   private async handleSettlementFailure(
-    session: PaymentSession | SessionRow,
-    receiver: { accountNumber: string; bankCode: string; accountName: string; bankName?: string },
+    session: SessionRow,
+    receiver: ReceiverData,
     error: string
   ): Promise<void> {
     console.error(`[Settlement] Failed for ${session.reference}: ${error}`);
 
-    // Convert SessionRow to PaymentSession-like object if needed
-    const sessionData: PaymentSession = 'fiat_amount' in session
-      ? {
-          ...session,
-          fiatAmount: session.fiat_amount,
-          fiatCurrency: session.fiat_currency as PaymentSession['fiatCurrency'],
-          receiverId: session.receiver_id ?? undefined,
-        } as PaymentSession
-      : session as PaymentSession;
+    // Convert SessionRow to SessionAlertData
+    const sessionData: SessionAlertData = {
+      reference: session.reference,
+      fiatAmount: session.fiat_amount,
+      fiatCurrency: session.fiat_currency,
+    };
 
     // Try to send Telegram alert
     const alertSent = await this.telegram.sendSettlementFailureAlert(
@@ -226,7 +229,11 @@ export class SettlementService {
       const sessionData = await this.getSession(session.id);
       if (sessionData) {
         await this.telegram.sendSettlementReversalAlert(
-          sessionData as PaymentSession,
+          {
+            reference: sessionData.reference,
+            fiatAmount: sessionData.fiat_amount,
+            fiatCurrency: sessionData.fiat_currency,
+          },
           reference,
           message || `Transfer ${status}`
         );
@@ -297,7 +304,7 @@ export class SettlementService {
     return rows[0] || null;
   }
 
-  private async getReceiver(receiverId: number | null | undefined): Promise<ReceiverRow | null> {
+  private async getReceiver(receiverId: number | null | undefined): Promise<ReceiverData | null> {
     if (!receiverId) return null;
 
     const [rows] = await pool.execute<ReceiverRow[]>(
@@ -305,7 +312,16 @@ export class SettlementService {
        FROM receivers WHERE id = ?`,
       [receiverId]
     );
-    return rows[0] || null;
+
+    const row = rows[0];
+    if (!row) return null;
+
+    return {
+      accountNumber: row.account_number,
+      bankCode: row.bank_code,
+      accountName: row.account_name,
+      bankName: row.bank_name,
+    };
   }
 
   private async updateSessionStatus(sessionId: string, status: string): Promise<void> {
@@ -363,7 +379,7 @@ export class SettlementService {
     }>
   ): Promise<void> {
     const updates: string[] = [];
-    const values: unknown[] = [];
+    const values: (string | number | null)[] = [];
 
     if (data.status) {
       updates.push('status = ?');

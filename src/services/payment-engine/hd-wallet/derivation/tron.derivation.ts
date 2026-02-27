@@ -6,7 +6,7 @@
  */
 
 import { HDKey } from '@scure/bip32';
-import { keccak_256 } from '@noble/hashes/sha3';
+import { keccak_256 } from '@noble/hashes/sha3.js';
 import { ChainDerivation, KeyMaterial, DERIVATION_PATHS } from '../types';
 
 const DERIVATION_PATH_BASE = DERIVATION_PATHS.tron;

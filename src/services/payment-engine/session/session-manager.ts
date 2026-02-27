@@ -19,6 +19,7 @@ import { generatePaymentIds } from '../utils';
 import { lockRate } from '../rate';
 import { calculateCharges } from '../charges';
 import { assignWallet, releaseWallet } from '../wallet';
+import { getHDWalletService } from '../hd-wallet';
 import { SessionRepository, sessionRepository, CreateSessionData } from './session-repository';
 import { getDepositWatcher } from '../watcher';
 
@@ -90,10 +91,11 @@ const VALID_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
   pending: ['confirming', 'expired', 'failed'],
   confirming: ['confirmed', 'failed'],
   confirmed: ['settling', 'failed'],
-  settling: ['settled', 'failed'],
+  settling: ['settled', 'failed', 'settlement_reversed'],
   settled: [],
   expired: [],
   failed: [],
+  settlement_reversed: [],
 };
 
 function isValidTransition(from: PaymentStatus, to: PaymentStatus): boolean {
@@ -127,10 +129,31 @@ export class SessionManager {
       rateLock
     );
 
-    const wallet = await assignWallet(
-      input.network,
-      this.config.sessionTtlMinutes
-    );
+    // Try HD wallet first, fall back to legacy wallet pool
+    const hdWallet = getHDWalletService();
+    let depositAddress: string;
+    let walletId: number | undefined;
+    let derivationIndex: number | undefined;
+    let hdChain: string | undefined;
+    let expiresAt: Date;
+
+    if (hdWallet?.isEnabled()) {
+      // Use HD wallet derivation
+      const derivation = await hdWallet.deriveNextAddress(input.network);
+      depositAddress = derivation.address;
+      derivationIndex = derivation.derivationIndex;
+      hdChain = derivation.chain;
+      expiresAt = new Date(Date.now() + this.config.sessionTtlMinutes * 60 * 1000);
+    } else {
+      // Fall back to legacy wallet pool
+      const wallet = await assignWallet(
+        input.network,
+        this.config.sessionTtlMinutes
+      );
+      depositAddress = wallet.address;
+      walletId = wallet.walletId;
+      expiresAt = wallet.expiresAt;
+    }
 
     let ids = generatePaymentIds();
     let attempts = 0;
@@ -158,15 +181,22 @@ export class SessionManager {
       rateLockedAt: rateLock.lockedAt,
       chargeAmount: charges.fiatCharge,
       chargeCrypto: charges.cryptoCharge,
-      depositAddress: wallet.address,
-      walletId: wallet.walletId,
+      depositAddress,
+      walletId,
+      derivationIndex,
+      hdChain: hdChain as any,
       payerChatId: input.payer.chatId,
       merchantId: input.merchantId,
-      expiresAt: wallet.expiresAt,
+      expiresAt,
       metadata: input.metadata,
     };
 
     const session = await this.repository.create(sessionData);
+
+    // Link address to session for HD wallet audit trail
+    if (hdWallet?.isEnabled() && derivationIndex !== undefined) {
+      await hdWallet.linkAddressToSession(depositAddress, session.id);
+    }
 
     // Notify deposit watcher to start monitoring this session
     const watcher = getDepositWatcher();
@@ -178,6 +208,8 @@ export class SessionManager {
         cryptoCurrency: session.crypto,
         expectedAmount: session.cryptoAmount,
         walletId: session.walletId,
+        derivationIndex: session.derivationIndex,
+        hdChain: session.hdChain,
         expiresAt: session.expiresAt,
       });
     }
@@ -252,7 +284,10 @@ export class SessionManager {
       );
     }
 
-    await releaseWallet(session.walletId, session.network);
+    // Only release wallet if using legacy wallet pool (not HD wallet)
+    if (session.walletId && !session.derivationIndex) {
+      await releaseWallet(session.walletId, session.network);
+    }
 
     return this.repository.update(id, {
       status: 'confirmed',
@@ -293,7 +328,10 @@ export class SessionManager {
       );
     }
 
-    await releaseWallet(session.walletId, session.network);
+    // Only release wallet if using legacy wallet pool (not HD wallet)
+    if (session.walletId && !session.derivationIndex) {
+      await releaseWallet(session.walletId, session.network);
+    }
 
     // Stop watching this session
     const watcher = getDepositWatcher();
@@ -313,7 +351,9 @@ export class SessionManager {
       );
     }
 
-    if (session.status === 'pending' || session.status === 'confirming') {
+    // Only release wallet if using legacy wallet pool (not HD wallet)
+    if ((session.status === 'pending' || session.status === 'confirming') &&
+        session.walletId && !session.derivationIndex) {
       await releaseWallet(session.walletId, session.network);
     }
 

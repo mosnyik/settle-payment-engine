@@ -251,34 +251,38 @@ Authorization: Bearer <ADMIN_SECRET>
 
 ### Payment Types
 
-| Type | Payer | Receiver | Use Case |
-|------|-------|----------|----------|
-| `transfer` | Required | Required | Direct payment |
-| `gift` | Required | Optional (claim later) | Send crypto gift |
-| `request` | Optional (fulfill later) | Required | Payment invoice |
-| `merchant` | Optional | Optional | Merchant checkout |
+| Type | Payer | Receiver | Crypto/Network | Use Case |
+|------|-------|----------|----------------|----------|
+| `transfer` | Required | Required | Required | Direct payment |
+| `gift` | Required | Optional (claim later) | Required | Send crypto gift |
+| `request` | Optional (fulfill later) | Required | Optional (set at fulfill) | Payment invoice |
+| `merchant` | Optional | Optional | Required | Merchant checkout |
 
 ### Status Lifecycle
 
 ```
+                              [request without crypto]
+                                       ↓
 created → pending → confirming → confirmed → settling → settled
-                                    ↓
-                              [if fails]
-                                    ↓
+   ↓         ↓                       ↓
+[fulfill] [deposit]              [if fails]
+                                     ↓
                     expired / failed / settlement_reversed
 ```
 
 | Status | Description |
 |--------|-------------|
-| `created` | Payment created, awaiting crypto |
-| `pending` | Deposit detected, awaiting confirmations |
-| `confirming` | Has some confirmations |
+| `created` | Request created without crypto (awaiting fulfillment) |
+| `pending` | Payment has deposit address, awaiting crypto deposit |
+| `confirming` | Deposit detected, awaiting confirmations |
 | `confirmed` | Fully confirmed, ready for settlement |
 | `settling` | Fiat payout in progress |
 | `settled` | Complete |
 | `expired` | Timed out |
 | `failed` | Error occurred |
 | `settlement_reversed` | Fiat payout reversed |
+
+**Note:** Transfers and gifts start at `pending` (have deposit address immediately). Requests without crypto start at `created` and move to `pending` when fulfilled.
 
 ### 1. Transfer Flow
 
@@ -339,14 +343,16 @@ POST /v1/payments/gifts/2S-XXXXXX/claim
 
 ### 3. Request Flow
 
+Payment requests allow the receiver to specify only the fiat amount they want. The payer chooses which crypto to pay with when fulfilling the request, and the exchange rate is locked at that moment.
+
+**Step 1: Create Request (crypto/network optional)**
+
 ```json
 POST /v1/payments
 {
   "type": "request",
   "fiatAmount": 15000,
   "fiatCurrency": "NGN",
-  "crypto": "ETH",
-  "network": "ethereum",
   "receiver": {
     "bankCode": "058",
     "accountNumber": "0987654321",
@@ -355,19 +361,74 @@ POST /v1/payments
 }
 ```
 
-1. Create request → Returns `reference`
-2. Requester shares `reference` with payer
-3. Payer fulfills:
+Response:
+```json
+{
+  "success": true,
+  "payment": {
+    "reference": "2S-XXXXXX",
+    "status": "created",
+    "fiatAmount": 15000,
+    "fiatCurrency": "NGN",
+    "depositAddress": null,
+    "cryptoAmount": null,
+    "crypto": null,
+    "network": null
+  }
+}
+```
+
+**Step 2: Requester shares `reference` with payer**
+
+**Step 3: Payer fulfills (provides crypto/network)**
 
 ```json
 POST /v1/payments/requests/2S-XXXXXX/fulfill
 {
-  "payer": { "chatId": "payer456" }
+  "payer": { "chatId": "payer456" },
+  "crypto": "USDT",
+  "network": "trc20"
 }
 ```
 
-4. Payer receives `depositAddress`, sends crypto
-5. Deposit confirmed → Settlement to requester
+Response (rate locked, crypto amount calculated):
+```json
+{
+  "success": true,
+  "payment": {
+    "reference": "2S-XXXXXX",
+    "status": "pending",
+    "depositAddress": "T...",
+    "cryptoAmount": 9.75,
+    "crypto": "USDT",
+    "network": "trc20",
+    "rate": 1538.46,
+    "fiatAmount": 15000
+  }
+}
+```
+
+**Step 4: Payer sends crypto to `depositAddress`**
+
+**Step 5: Deposit confirmed → Settlement to requester**
+
+**Alternative: Pre-specified crypto**
+
+If you know which crypto the payer will use, you can specify it at creation:
+
+```json
+POST /v1/payments
+{
+  "type": "request",
+  "fiatAmount": 15000,
+  "fiatCurrency": "NGN",
+  "crypto": "ETH",
+  "network": "ethereum",
+  "receiver": { ... }
+}
+```
+
+This will return `status: "pending"` with `depositAddress` immediately (rate locked at creation).
 
 ### Supported Crypto/Network Combinations
 

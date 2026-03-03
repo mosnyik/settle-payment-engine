@@ -19,13 +19,13 @@ export interface CreateSessionData {
   type: PaymentType;
   fiatAmount: number;
   fiatCurrency: FiatCurrency;
-  cryptoAmount: number;
-  crypto: CryptoCurrency;
-  network: Network;
-  rate: number;
-  assetPrice: number;
-  chargeAmount: number;
-  depositAddress: string;
+  cryptoAmount?: number; // Optional for request type (set at fulfillment)
+  crypto?: CryptoCurrency; // Optional for request type (set at fulfillment)
+  network?: Network; // Optional for request type (set at fulfillment)
+  rate?: number; // Optional for request type (set at fulfillment)
+  assetPrice?: number; // Optional for request type (set at fulfillment)
+  chargeAmount?: number; // Optional for request type (set at fulfillment)
+  depositAddress?: string; // Optional for request type (set at fulfillment)
   walletId?: number; // Deprecated: use derivationIndex
   derivationIndex?: number; // HD wallet derivation index
   hdChain?: HDChain; // HD wallet chain
@@ -47,6 +47,18 @@ export interface UpdateSessionData {
   receiverId?: number;
   cashbackAmount?: number;
   cashbackCredited?: boolean;
+  // Fields for request fulfillment
+  crypto?: CryptoCurrency;
+  network?: Network;
+  cryptoAmount?: number;
+  rate?: number;
+  assetPrice?: number;
+  chargeAmount?: number;
+  depositAddress?: string;
+  walletId?: number;
+  derivationIndex?: number;
+  hdChain?: HDChain;
+  expiresAt?: Date;
 }
 
 function rowToSession(row: any): PaymentSession {
@@ -101,16 +113,17 @@ export class SessionRepository {
           data.id,
           data.reference,
           data.type,
-          'pending',
+          // Use 'created' status for requests without crypto (no deposit address yet)
+          data.depositAddress ? 'pending' : 'created',
           data.fiatAmount,
           data.fiatCurrency,
-          data.cryptoAmount,
-          data.crypto,
-          data.network,
-          data.rate,
-          data.assetPrice,
-          data.chargeAmount,
-          data.depositAddress,
+          data.cryptoAmount ?? null,
+          data.crypto ?? null,
+          data.network ?? null,
+          data.rate ?? null,
+          data.assetPrice ?? null,
+          data.chargeAmount ?? null,
+          data.depositAddress ?? null,
           data.walletId || null,
           data.derivationIndex || null,
           data.hdChain || null,
@@ -126,7 +139,7 @@ export class SessionRepository {
 
       return {
         ...data,
-        status: 'pending',
+        status: data.depositAddress ? 'pending' : 'created',
         createdAt: now,
       } as PaymentSession;
     } catch (error) {
@@ -252,6 +265,51 @@ export class SessionRepository {
     if (data.cashbackCredited !== undefined) {
       updates.push('cashback_credited = ?');
       values.push(data.cashbackCredited ? 1 : 0);
+    }
+    // Request fulfillment fields
+    if (data.crypto !== undefined) {
+      updates.push('crypto = ?');
+      values.push(data.crypto);
+    }
+    if (data.network !== undefined) {
+      updates.push('network = ?');
+      values.push(data.network);
+    }
+    if (data.cryptoAmount !== undefined) {
+      updates.push('crypto_amount = ?');
+      values.push(data.cryptoAmount);
+    }
+    if (data.rate !== undefined) {
+      updates.push('rate = ?');
+      values.push(data.rate);
+    }
+    if (data.assetPrice !== undefined) {
+      updates.push('asset_price = ?');
+      values.push(data.assetPrice);
+    }
+    if (data.chargeAmount !== undefined) {
+      updates.push('charge_amount = ?');
+      values.push(data.chargeAmount);
+    }
+    if (data.depositAddress !== undefined) {
+      updates.push('deposit_address = ?');
+      values.push(data.depositAddress);
+    }
+    if (data.walletId !== undefined) {
+      updates.push('wallet_id = ?');
+      values.push(data.walletId);
+    }
+    if (data.derivationIndex !== undefined) {
+      updates.push('derivation_index = ?');
+      values.push(data.derivationIndex);
+    }
+    if (data.hdChain !== undefined) {
+      updates.push('hd_chain = ?');
+      values.push(data.hdChain);
+    }
+    if (data.expiresAt !== undefined) {
+      updates.push('expires_at = ?');
+      values.push(data.expiresAt);
     }
 
     updates.push('updated_at = ?');

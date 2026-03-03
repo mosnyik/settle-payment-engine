@@ -69,8 +69,8 @@ export interface CreatePaymentInput {
   type: PaymentType;
   fiatAmount: number;
   fiatCurrency: FiatCurrency;
-  crypto: CryptoCurrency;
-  network: Network;
+  crypto?: CryptoCurrency; // Optional for request type (provided at fulfillment)
+  network?: Network; // Optional for request type (provided at fulfillment)
   payer?: PayerInput; // Optional for request type
   receiver?: ReceiverInput;
   merchantId?: string;
@@ -100,13 +100,13 @@ export interface PaymentSession {
   status: PaymentStatus;
   fiatAmount: number;
   fiatCurrency: FiatCurrency;
-  cryptoAmount: number;
-  crypto: CryptoCurrency;
-  network: Network;
-  rate: number;
-  assetPrice: number;
-  chargeAmount: number;
-  depositAddress: string;
+  cryptoAmount?: number; // Optional for request type (set at fulfillment)
+  crypto?: CryptoCurrency; // Optional for request type (set at fulfillment)
+  network?: Network; // Optional for request type (set at fulfillment)
+  rate?: number; // Optional for request type (set at fulfillment)
+  assetPrice?: number; // Optional for request type (set at fulfillment)
+  chargeAmount?: number; // Optional for request type (set at fulfillment)
+  depositAddress?: string; // Optional for request type (set at fulfillment)
   walletId?: number; // Deprecated: use derivationIndex
   derivationIndex?: number; // HD wallet derivation index
   hdChain?: HDChain; // HD wallet chain

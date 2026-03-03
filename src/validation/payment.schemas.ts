@@ -54,8 +54,8 @@ const basePaymentSchema = z.object({
   type: z.enum(PAYMENT_TYPES),
   fiatAmount: z.number().positive('Fiat amount must be positive'),
   fiatCurrency: z.enum(FIAT_CURRENCIES),
-  crypto: z.enum(CRYPTO_CURRENCIES),
-  network: z.enum(NETWORKS),
+  crypto: z.enum(CRYPTO_CURRENCIES).optional(), // Optional for request type (set at fulfillment)
+  network: z.enum(NETWORKS).optional(), // Optional for request type (set at fulfillment)
   payer: payerInputSchema.optional(),
   receiver: receiverInputSchema.optional(),
   merchantId: z.string().optional(),
@@ -66,7 +66,7 @@ const basePaymentSchema = z.object({
 
 /** Create payment schema with type-specific validation */
 export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => {
-  // Validate crypto-network compatibility
+  // Validate crypto-network compatibility (only if both are provided)
   const validNetworks: Record<string, string[]> = {
     BTC: ['bitcoin'],
     ETH: ['ethereum'],
@@ -76,12 +76,46 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
     USDC: ['ethereum', 'erc20', 'bsc', 'bep20'],
   };
 
-  if (!validNetworks[data.crypto]?.includes(data.network)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: `${data.crypto} is not supported on ${data.network}`,
-      path: ['network'],
-    });
+  // Type-specific validation
+  switch (data.type) {
+    case 'transfer':
+    case 'gift':
+      // Crypto and network are required for transfer and gift
+      if (!data.crypto) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Crypto is required for transfers and gifts',
+          path: ['crypto'],
+        });
+      }
+      if (!data.network) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Network is required for transfers and gifts',
+          path: ['network'],
+        });
+      }
+      break;
+
+    case 'request':
+      // Crypto and network are optional for requests (set at fulfillment)
+      // No validation needed here
+      break;
+
+    case 'merchant':
+      // Merchant payments may have different requirements
+      break;
+  }
+
+  // Validate crypto-network compatibility if both are provided
+  if (data.crypto && data.network) {
+    if (!validNetworks[data.crypto]?.includes(data.network)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${data.crypto} is not supported on ${data.network}`,
+        path: ['network'],
+      });
+    }
   }
 
   // Type-specific participant validation
@@ -123,6 +157,7 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
         });
       }
       // Payer is optional - set when request is fulfilled
+      // Crypto/network optional - set when request is fulfilled
       break;
 
     case 'merchant':
@@ -144,10 +179,32 @@ export const claimGiftSchema = z.object({
 // REQUEST FULFILL SCHEMA
 // =============================================================================
 
-/** Schema for fulfilling a request (setting payer) */
-export const fulfillRequestSchema = z.object({
-  payer: payerInputSchema,
-});
+/** Schema for fulfilling a request (setting payer and crypto details) */
+export const fulfillRequestSchema = z
+  .object({
+    payer: payerInputSchema,
+    crypto: z.enum(CRYPTO_CURRENCIES),
+    network: z.enum(NETWORKS),
+  })
+  .superRefine((data, ctx) => {
+    // Validate crypto-network compatibility
+    const validNetworks: Record<string, string[]> = {
+      BTC: ['bitcoin'],
+      ETH: ['ethereum'],
+      BNB: ['bsc'],
+      TRX: ['tron'],
+      USDT: ['ethereum', 'erc20', 'bsc', 'bep20', 'tron', 'trc20'],
+      USDC: ['ethereum', 'erc20', 'bsc', 'bep20'],
+    };
+
+    if (!validNetworks[data.crypto]?.includes(data.network)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${data.crypto} is not supported on ${data.network}`,
+        path: ['network'],
+      });
+    }
+  });
 
 // =============================================================================
 // QUERY SCHEMAS

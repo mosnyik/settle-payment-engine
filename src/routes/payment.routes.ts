@@ -47,8 +47,8 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       type: input.type,
       fiatAmount: input.fiatAmount,
       fiatCurrency: input.fiatCurrency,
-      crypto: input.crypto,
-      network: input.network,
+      crypto: input.crypto as any, // Optional for request type
+      network: input.network as any, // Optional for request type
       payer: input.payer ? {
         chatId: input.payer.chatId,
         phone: input.payer.phone,
@@ -253,7 +253,8 @@ router.post(
 /**
  * POST /payments/requests/:reference/fulfill
  *
- * Fulfill a payment request by providing payer details.
+ * Fulfill a payment request by providing payer details and crypto/network.
+ * This locks the rate and calculates crypto amount at fulfillment time.
  * Only works for request-type payments that don't have a payer yet.
  */
 router.post(
@@ -290,20 +291,27 @@ router.post(
         });
       }
 
-      // Check if already fulfilled (has payer)
-      if (session.payerId) {
+      // Check if already fulfilled (has deposit address = already assigned crypto)
+      if (session.depositAddress) {
         return res.status(400).json({
           success: false,
           error: 'Request has already been fulfilled',
         });
       }
 
+      // Fulfill request - this locks rate, calculates crypto amount, assigns wallet
+      const fulfilledSession = await paymentEngine.fulfillRequest(
+        session.id,
+        parsed.data.crypto,
+        parsed.data.network
+      );
+
       // Create/get payer and link to session
       const payerId = await participantService.getOrCreatePayer(parsed.data.payer);
-      await paymentEngine.setPayerId(session.id, payerId);
+      await paymentEngine.setPayerId(fulfilledSession.id, payerId);
 
       // Sync to legacy
-      const updatedSession = await paymentEngine.getPayment(session.id);
+      const updatedSession = await paymentEngine.getPayment(fulfilledSession.id);
       await legacySyncService.syncToLegacy(updatedSession);
 
       return res.json({
@@ -315,6 +323,13 @@ router.post(
           status: updatedSession.status,
           depositAddress: updatedSession.depositAddress,
           cryptoAmount: updatedSession.cryptoAmount,
+          crypto: updatedSession.crypto,
+          network: updatedSession.network,
+          rate: updatedSession.rate,
+          chargeAmount: updatedSession.chargeAmount,
+          fiatAmount: updatedSession.fiatAmount,
+          fiatCurrency: updatedSession.fiatCurrency,
+          expiresAt: updatedSession.expiresAt,
           payerId: updatedSession.payerId,
         },
       });

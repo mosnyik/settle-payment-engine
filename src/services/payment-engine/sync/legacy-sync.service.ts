@@ -286,7 +286,8 @@ export class LegacySyncService {
       [transactionId, session.type]
     ) as [any[], any];
 
-    const dollarAmount = session.cryptoAmount * session.assetPrice;
+    // For unfulfilled requests, crypto fields may be undefined
+    const dollarAmount = (session.cryptoAmount ?? 0) * (session.assetPrice ?? 0);
 
     if (existing && existing.length > 0) {
       // Update existing

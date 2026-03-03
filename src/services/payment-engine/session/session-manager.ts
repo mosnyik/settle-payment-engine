@@ -56,14 +56,6 @@ function validateCreateInput(input: CreatePaymentInput): void {
     throw new InvalidInputError('Fiat currency is required', 'fiatCurrency');
   }
 
-  if (!input.crypto) {
-    throw new InvalidInputError('Crypto is required', 'crypto');
-  }
-
-  if (!input.network) {
-    throw new InvalidInputError('Network is required', 'network');
-  }
-
   // Type-specific payer/receiver validation
   if (input.type === 'transfer' || input.type === 'gift') {
     if (!input.payer?.chatId) {
@@ -86,11 +78,23 @@ function validateCreateInput(input: CreatePaymentInput): void {
     }
   }
 
-  validateCryptoNetwork(input.crypto, input.network);
+  // Crypto/network required for transfer and gift, optional for request (set at fulfillment)
+  if (input.type !== 'request') {
+    if (!input.crypto) {
+      throw new InvalidInputError('Crypto is required', 'crypto');
+    }
+    if (!input.network) {
+      throw new InvalidInputError('Network is required', 'network');
+    }
+    validateCryptoNetwork(input.crypto, input.network);
+  } else if (input.crypto && input.network) {
+    // If crypto/network provided for request, validate compatibility
+    validateCryptoNetwork(input.crypto, input.network);
+  }
 }
 
 const VALID_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
-  created: ['pending', 'expired', 'failed'],
+  created: ['pending', 'expired', 'failed'], // 'pending' when request is fulfilled with crypto
   pending: ['confirming', 'expired', 'failed'],
   confirming: ['confirmed', 'failed'],
   confirmed: ['settling', 'failed'],
@@ -120,15 +124,55 @@ export class SessionManager {
   async createSession(input: CreatePaymentInput): Promise<PaymentSession> {
     validateCreateInput(input);
 
+    let ids = generatePaymentIds();
+    let attempts = 0;
+    const maxAttempts = 5;
+
+    while (await this.repository.referenceExists(ids.reference)) {
+      attempts++;
+      if (attempts >= maxAttempts) {
+        throw new Error('Failed to generate unique reference after multiple attempts');
+      }
+      ids = generatePaymentIds();
+    }
+
+    // For requests without crypto/network, create session without wallet assignment
+    // Crypto amount and rate will be calculated at fulfillment time
+    if (input.type === 'request' && (!input.crypto || !input.network)) {
+      const expiresAt = new Date(Date.now() + this.config.sessionTtlMinutes * 60 * 1000);
+
+      const sessionData: CreateSessionData = {
+        id: ids.id,
+        reference: ids.reference,
+        type: input.type,
+        fiatAmount: input.fiatAmount,
+        fiatCurrency: input.fiatCurrency,
+        // These will be set at fulfillment
+        cryptoAmount: undefined,
+        crypto: undefined,
+        network: undefined,
+        rate: undefined,
+        assetPrice: undefined,
+        chargeAmount: undefined,
+        depositAddress: undefined,
+        merchantId: input.merchantId,
+        expiresAt,
+        metadata: input.metadata,
+      };
+
+      return this.repository.create(sessionData);
+    }
+
+    // For transfers, gifts, and requests with crypto specified
     const rateLock = await lockRate(
-      input.crypto,
+      input.crypto!,
       input.fiatCurrency,
       this.config.rateLockTtlMinutes
     );
 
     const charges = calculateCharges(
       input.fiatAmount,
-      input.crypto,
+      input.crypto!,
       rateLock
     );
 
@@ -142,7 +186,7 @@ export class SessionManager {
 
     if (hdWallet?.isEnabled()) {
       // Use HD wallet derivation
-      const derivation = await hdWallet.deriveNextAddress(input.network);
+      const derivation = await hdWallet.deriveNextAddress(input.network!);
       depositAddress = derivation.address;
       derivationIndex = derivation.derivationIndex;
       hdChain = derivation.chain;
@@ -150,24 +194,12 @@ export class SessionManager {
     } else {
       // Fall back to legacy wallet pool
       const wallet = await assignWallet(
-        input.network,
+        input.network!,
         this.config.sessionTtlMinutes
       );
       depositAddress = wallet.address;
       walletId = wallet.walletId;
       expiresAt = wallet.expiresAt;
-    }
-
-    let ids = generatePaymentIds();
-    let attempts = 0;
-    const maxAttempts = 5;
-
-    while (await this.repository.referenceExists(ids.reference)) {
-      attempts++;
-      if (attempts >= maxAttempts) {
-        throw new Error('Failed to generate unique reference after multiple attempts');
-      }
-      ids = generatePaymentIds();
     }
 
     const sessionData: CreateSessionData = {
@@ -199,8 +231,9 @@ export class SessionManager {
     }
 
     // Notify deposit watcher to start monitoring this session
+    // Only watch if we have all required crypto fields (not for requests without crypto)
     const watcher = getDepositWatcher();
-    if (watcher?.isActive()) {
+    if (watcher?.isActive() && session.depositAddress && session.network && session.crypto && session.cryptoAmount) {
       watcher.watch({
         sessionId: session.id,
         depositAddress: session.depositAddress,
@@ -285,7 +318,7 @@ export class SessionManager {
     }
 
     // Only release wallet if using legacy wallet pool (not HD wallet)
-    if (session.walletId && !session.derivationIndex) {
+    if (session.walletId && !session.derivationIndex && session.network) {
       await releaseWallet(session.walletId, session.network);
     }
 
@@ -320,16 +353,17 @@ export class SessionManager {
   async expireSession(id: string): Promise<PaymentSession> {
     const session = await this.getSession(id);
 
-    if (session.status !== 'pending') {
+    // Allow expiring 'created' (unfulfilled requests) or 'pending' sessions
+    if (session.status !== 'pending' && session.status !== 'created') {
       throw new InvalidSessionStateError(
         session.status,
         'expire',
-        ['pending']
+        ['pending', 'created']
       );
     }
 
-    // Only release wallet if using legacy wallet pool (not HD wallet)
-    if (session.walletId && !session.derivationIndex) {
+    // Only release wallet if using legacy wallet pool (not HD wallet) and has network
+    if (session.walletId && !session.derivationIndex && session.network) {
       await releaseWallet(session.walletId, session.network);
     }
 
@@ -351,9 +385,9 @@ export class SessionManager {
       );
     }
 
-    // Only release wallet if using legacy wallet pool (not HD wallet)
+    // Only release wallet if using legacy wallet pool (not HD wallet) and has network
     if ((session.status === 'pending' || session.status === 'confirming') &&
-        session.walletId && !session.derivationIndex) {
+        session.walletId && !session.derivationIndex && session.network) {
       await releaseWallet(session.walletId, session.network);
     }
 
@@ -394,6 +428,113 @@ export class SessionManager {
 
   async creditCashback(sessionId: string): Promise<PaymentSession> {
     return this.repository.update(sessionId, { cashbackCredited: true });
+  }
+
+  /**
+   * Fulfill a request by setting crypto/network and assigning a deposit address.
+   * This locks the rate and calculates the crypto amount based on current rates.
+   */
+  async fulfillRequest(
+    sessionId: string,
+    crypto: string,
+    network: string
+  ): Promise<PaymentSession> {
+    const session = await this.getSession(sessionId);
+
+    if (session.type !== 'request') {
+      throw new InvalidSessionStateError(
+        session.status,
+        'fulfill (not a request)',
+        []
+      );
+    }
+
+    // If already has crypto/deposit address, it's already been fulfilled
+    if (session.depositAddress) {
+      throw new InvalidSessionStateError(
+        session.status,
+        'fulfill (already has deposit address)',
+        []
+      );
+    }
+
+    validateCryptoNetwork(crypto, network);
+
+    // Lock rate at fulfillment time
+    const rateLock = await lockRate(
+      crypto as any,
+      session.fiatCurrency,
+      this.config.rateLockTtlMinutes
+    );
+
+    const charges = calculateCharges(
+      session.fiatAmount,
+      crypto as any,
+      rateLock
+    );
+
+    // Assign wallet (HD or legacy)
+    const hdWallet = getHDWalletService();
+    let depositAddress: string;
+    let walletId: number | undefined;
+    let derivationIndex: number | undefined;
+    let hdChain: string | undefined;
+    let expiresAt: Date;
+
+    if (hdWallet?.isEnabled()) {
+      const derivation = await hdWallet.deriveNextAddress(network as any);
+      depositAddress = derivation.address;
+      derivationIndex = derivation.derivationIndex;
+      hdChain = derivation.chain;
+      expiresAt = new Date(Date.now() + this.config.sessionTtlMinutes * 60 * 1000);
+    } else {
+      const wallet = await assignWallet(
+        network as any,
+        this.config.sessionTtlMinutes
+      );
+      depositAddress = wallet.address;
+      walletId = wallet.walletId;
+      expiresAt = wallet.expiresAt;
+    }
+
+    // Update session with crypto details and transition to pending
+    const updatedSession = await this.repository.update(sessionId, {
+      status: 'pending', // Transition from 'created' to 'pending'
+      crypto: crypto as any,
+      network: network as any,
+      cryptoAmount: charges.totalCryptoAmount,
+      rate: rateLock.rate,
+      assetPrice: rateLock.assetPrice,
+      chargeAmount: charges.fiatCharge,
+      depositAddress,
+      walletId,
+      derivationIndex,
+      hdChain: hdChain as any,
+      expiresAt,
+    });
+
+    // Link address to session for HD wallet audit trail
+    if (hdWallet?.isEnabled() && derivationIndex !== undefined) {
+      await hdWallet.linkAddressToSession(depositAddress, sessionId);
+    }
+
+    // Start watching for deposits - we just set all these values so they're non-null
+    const watcher = getDepositWatcher();
+    if (watcher?.isActive()) {
+      watcher.watch({
+        sessionId: updatedSession.id,
+        depositAddress: depositAddress, // Use local var - guaranteed non-null
+        network: network as any, // Use local var - guaranteed non-null
+        cryptoCurrency: crypto as any, // Use local var - guaranteed non-null
+        expectedAmount: charges.totalCryptoAmount, // Use local var
+        walletId: updatedSession.walletId,
+        derivationIndex: updatedSession.derivationIndex,
+        hdChain: updatedSession.hdChain,
+        expiresAt: expiresAt, // Use local var
+      });
+    }
+
+    return updatedSession;
   }
 }
 

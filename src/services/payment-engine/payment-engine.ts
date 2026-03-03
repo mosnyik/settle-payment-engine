@@ -331,6 +331,40 @@ export class PaymentEngine {
   async creditCashback(paymentId: string): Promise<PaymentSession> {
     return this.manager.creditCashback(paymentId);
   }
+
+  // ===========================================================================
+  // REQUEST FULFILLMENT
+  // ===========================================================================
+
+  /**
+   * Fulfill a payment request by providing crypto details.
+   *
+   * This locks the exchange rate at the current time, calculates the crypto
+   * amount based on the requested fiat amount, and assigns a deposit address.
+   *
+   * @param paymentId - The payment ID
+   * @param crypto - The crypto currency to pay with
+   * @param network - The network to use
+   * @returns The updated payment session with deposit address and crypto amount
+   *
+   * @example
+   * ```typescript
+   * // Request was created with only fiat amount
+   * const request = await engine.getPaymentByReference('2S-ABC123');
+   * // { fiatAmount: 10000, fiatCurrency: 'NGN', crypto: null, network: null }
+   *
+   * // Payer chooses to pay with USDT on Tron
+   * const updated = await engine.fulfillRequest(request.id, 'USDT', 'trc20');
+   * // { cryptoAmount: 6.50, depositAddress: 'T...', rate: 1538.46 }
+   * ```
+   */
+  async fulfillRequest(
+    paymentId: string,
+    crypto: string,
+    network: string
+  ): Promise<PaymentSession> {
+    return this.manager.fulfillRequest(paymentId, crypto, network);
+  }
 }
 
 // Export a default instance for convenience

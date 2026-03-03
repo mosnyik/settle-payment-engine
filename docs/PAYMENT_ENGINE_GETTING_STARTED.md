@@ -314,8 +314,10 @@ E-commerce checkout flow (customizable).
 ### Base URL
 
 ```
-https://api.spend.2settle.io/v1
+https://api.spend.2settle.io
 ```
+
+All API endpoints are prefixed with `/v1`. For example: `https://api.spend.2settle.io/v1/payments`
 
 ### Permissions
 

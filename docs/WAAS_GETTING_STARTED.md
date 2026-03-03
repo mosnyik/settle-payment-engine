@@ -1,6 +1,8 @@
-# Wallet-as-a-Service (WaaS) - Getting Started Guide
+# 2settle HD Wallet Service (HDWaaS) - Getting Started Guide
 
 Generate unique cryptocurrency deposit addresses on demand with automatic deposit detection and webhook notifications.
+
+> **Alias:** Throughout this documentation and in code examples, we use **HDWaaS** as the short name for 2settle HD Wallet Service.
 
 ## Table of Contents
 
@@ -18,7 +20,7 @@ Generate unique cryptocurrency deposit addresses on demand with automatic deposi
 
 ## Overview
 
-### What is WaaS?
+### What is 2settle HD Wallet Service?
 
 Wallet-as-a-Service allows you to generate unique HD wallet addresses for each customer deposit. Instead of managing your own wallet infrastructure, you can:
 
@@ -41,7 +43,7 @@ Wallet-as-a-Service allows you to generate unique HD wallet addresses for each c
 ### How It Works
 
 ```
-1. Your App                    2. WaaS API                    3. Blockchain
+1. Your App                    2. HDWaaS API                 3. Blockchain
    │                              │                              │
    │─── Create Wallet ───────────>│                              │
    │<── Return Address ───────────│                              │
@@ -180,8 +182,10 @@ We use `SHA256(secretKey)` as the HMAC key for security:
 ### Base URL
 
 ```
-https://api.spend.2settle.io/v1
+https://api.spend.2settle.io
 ```
+
+All API endpoints are prefixed with `/v1`. For example: `https://api.spend.2settle.io/v1/wallets`
 
 ### Create Wallet
 
@@ -335,7 +339,7 @@ GET /v1/wallets?status=confirmed&limit=10&offset=0
 ```javascript
 const crypto = require('crypto');
 
-class WaaSClient {
+class HDWaaSClient {
   constructor(apiKey, secretKey, baseUrl = 'https://api.spend.2settle.io') {
     this.apiKey = apiKey;
     this.secretKey = secretKey;
@@ -400,7 +404,7 @@ class WaaSClient {
 }
 
 // Usage
-const client = new WaaSClient('pk_your_api_key', 'sk_your_secret_key');
+const client = new HDWaaSClient('pk_your_api_key', 'sk_your_secret_key');
 
 // Create USDT deposit address
 const wallet = await client.createWallet({
@@ -426,7 +430,7 @@ import json
 import time
 import requests
 
-class WaaSClient:
+class HDWaaSClient:
     def __init__(self, api_key: str, secret_key: str, base_url: str = 'https://api.spend.2settle.io'):
         self.api_key = api_key
         self.secret_key = secret_key
@@ -482,7 +486,7 @@ class WaaSClient:
 
 
 # Usage
-client = WaaSClient('pk_your_api_key', 'sk_your_secret_key')
+client = HDWaaSClient('pk_your_api_key', 'sk_your_secret_key')
 
 # Create USDT deposit address
 result = client.create_wallet(
@@ -504,7 +508,7 @@ print(f"Status: {status['wallet']['status']}")
 ```php
 <?php
 
-class WaaSClient {
+class HDWaaSClient {
     private string $apiKey;
     private string $secretKey;
     private string $baseUrl;
@@ -573,7 +577,7 @@ class WaaSClient {
 }
 
 // Usage
-$client = new WaaSClient('pk_your_api_key', 'sk_your_secret_key');
+$client = new HDWaaSClient('pk_your_api_key', 'sk_your_secret_key');
 
 // Create USDT deposit address
 $result = $client->createWallet('trc20', 'USDT', ['orderId' => 'ORD-12345'], 60);

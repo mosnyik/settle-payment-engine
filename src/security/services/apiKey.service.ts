@@ -32,15 +32,31 @@ interface ApiKeyRow extends RowDataPacket {
  * Convert database row to ApiKey object
  */
 function rowToApiKey(row: ApiKeyRow): ApiKey {
+  // Handle permissions - may already be parsed by mysql2 if using JSON column
+  let permissions: string[] = [];
+  if (row.permissions) {
+    permissions = typeof row.permissions === 'string'
+      ? JSON.parse(row.permissions)
+      : row.permissions;
+  }
+
+  // Handle ipWhitelist - may already be parsed by mysql2 if using JSON column
+  let ipWhitelist: string[] | null = null;
+  if (row.ip_whitelist) {
+    ipWhitelist = typeof row.ip_whitelist === 'string'
+      ? JSON.parse(row.ip_whitelist)
+      : row.ip_whitelist;
+  }
+
   return {
     id: row.id,
     keyId: row.key_id,
     keyHash: row.key_hash,
     merchantId: row.merchant_id,
     name: row.name,
-    permissions: row.permissions ? JSON.parse(row.permissions) : [],
+    permissions,
     rateLimitTier: row.rate_limit_tier,
-    ipWhitelist: row.ip_whitelist ? JSON.parse(row.ip_whitelist) : null,
+    ipWhitelist,
     isActive: row.is_active,
     expiresAt: row.expires_at,
     createdAt: row.created_at,

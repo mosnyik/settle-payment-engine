@@ -36,10 +36,6 @@ export function generateSignature(
     bodyHash,
   });
 
-  console.log("Body String for Hashing:", bodyString);
-  console.log("Body Hash:", bodyHash);
-  console.log("Payload for Signature:", payload);
-
   return hmacSha256(secretKey, payload);
 }
 
@@ -61,9 +57,6 @@ export function verifySignature(
     path,
     body,
   );
-  console.log("Secret Key:", secretKey);
-  console.log("Expected Signature:", expectedSignature);
-  console.log("Provided Signature:", providedSignature);
   return secureCompare(providedSignature, expectedSignature);
 }
 

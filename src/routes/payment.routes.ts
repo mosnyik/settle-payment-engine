@@ -15,6 +15,7 @@ import {
   fulfillRequestSchema,
 } from '../validation/payment.schemas';
 import { PaymentEngineError } from '../services/payment-engine/errors';
+import { requirePermission } from '../security/middleware/authenticate';
 
 const router = Router();
 
@@ -27,8 +28,12 @@ const router = Router();
  *
  * Create a new payment of any type (transfer, gift, request, merchant).
  * Uses PaymentEngine facade for unified handling.
+ * Requires 'payment:create' permission.
  */
-router.post('/', async (req: Request, res: Response, next: NextFunction) => {
+router.post(
+  '/',
+  requirePermission('payment:create'),
+  async (req: Request, res: Response, next: NextFunction) => {
   try {
     // Validate input
     const parsed = createPaymentSchema.safeParse(req.body);
@@ -114,8 +119,12 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
  * GET /payments/:reference
  *
  * Get payment by reference (e.g., 2S-XXXXXX).
+ * Requires 'payment:read' permission.
  */
-router.get('/:reference', async (req: Request, res: Response, next: NextFunction) => {
+router.get(
+  '/:reference',
+  requirePermission('payment:read'),
+  async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { reference } = req.params;
 

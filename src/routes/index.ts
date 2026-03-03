@@ -8,6 +8,7 @@ import bankRoutes from './bank.routes';
 import cryptoRoutes from './crypto.routes';
 import adminRoutes from './admin';
 import paymentRoutes from './payment.routes';
+import walletRoutes from './wallet.routes';
 import {
   deprecateTransferRoutes,
   deprecateGiftRoutes,
@@ -21,6 +22,11 @@ const router = Router();
 // NEW UNIFIED ROUTES (preferred)
 // =============================================================================
 router.use('/payments', paymentRoutes);
+
+// =============================================================================
+// WALLET-AS-A-SERVICE ROUTES
+// =============================================================================
+router.use('/wallets', walletRoutes);
 
 // =============================================================================
 // LEGACY ROUTES (deprecated - use /payments instead)

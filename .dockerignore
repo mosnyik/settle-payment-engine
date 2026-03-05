@@ -1,0 +1,37 @@
+# Dependencies
+node_modules
+
+# Build output (rebuilt in container)
+dist
+
+# Development files
+.git
+.gitignore
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Test files
+*.test.ts
+*.spec.ts
+__tests__
+coverage
+.vitest
+
+# Documentation
+*.md
+!README.md
+docs
+
+# Misc
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+pnpm-debug.log*

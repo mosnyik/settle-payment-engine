@@ -1,4 +1,4 @@
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
 
 dotenv.config();
 
@@ -48,7 +48,8 @@ export const config = {
           process.env.WATCHER_BSC_POLL_MS || "5000",
           10,
         ),
-        apiKey: process.env.BSCSCAN_API_KEY || "",
+        // Etherscan V2 API uses a single endpoint for all chains - same API key works
+        apiKey: process.env.BSCSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || "",
         apiUrl:
           process.env.BSCSCAN_API_URL || "https://api.etherscan.io/v2/api",
         rateLimitMs: parseInt(

@@ -207,7 +207,7 @@ export class EthereumAdapter extends ChainAdapter {
   /**
    * Get ERC20 token transactions.
    */
-  private async getTokenTransactions(
+  protected async getTokenTransactions(
     address: string,
     tokenAddress: string,
     currentBlock: number,

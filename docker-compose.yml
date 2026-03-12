@@ -1,0 +1,97 @@
+
+#   Development:  docker compose up -d
+#   Production:   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   Logs:         docker compose logs -f payment-engine
+#   Stop:         docker compose down
+
+services:
+  payment-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: payment-engine
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3500}:3500"
+    environment:
+      - NODE_ENV=production
+      - PORT=3500
+      # Database
+      - DB_HOST=${DB_HOST:-mysql}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-2settle_db}
+      # Admin
+      - ADMIN_SECRET=${ADMIN_SECRET}
+      # External APIs
+      - COINMARKETCAP_API_KEY=${COINMARKETCAP_API_KEY}
+      - NUBAN_API_KEY=${NUBAN_API_KEY}
+      # HD Wallet
+      - HD_WALLET_ENABLED=${HD_WALLET_ENABLED:-false}
+      - HD_SEED_PHRASE_ENCRYPTED=${HD_SEED_PHRASE_ENCRYPTED}
+      - HD_SEED_ENCRYPTION_KEY=${HD_SEED_ENCRYPTION_KEY}
+      - HOT_WALLET_BITCOIN=${HOT_WALLET_BITCOIN}
+      - HOT_WALLET_ETHEREUM=${HOT_WALLET_ETHEREUM}
+      - HOT_WALLET_TRON=${HOT_WALLET_TRON}
+      # Sweeper
+      - SWEEPER_ENABLED=${SWEEPER_ENABLED:-false}
+      - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL}
+      - BSC_RPC_URL=${BSC_RPC_URL}
+      # Watcher
+      - WATCHER_ENABLED=${WATCHER_ENABLED:-true}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY}
+      - BSCSCAN_API_KEY=${BSCSCAN_API_KEY}
+      - TRONGRID_API_KEY=${TRONGRID_API_KEY}
+      # Settlement
+      - SETTLEMENT_ENABLED=${SETTLEMENT_ENABLED:-false}
+      - MONGORO_API_URL=${MONGORO_API_URL}
+      - MONGORO_TOKEN=${MONGORO_TOKEN}
+      - MONGORO_TRANSFERPIN=${MONGORO_TRANSFERPIN}
+      - MONGORO_CALLBACK_URL=${MONGORO_CALLBACK_URL}
+      # Telegram
+      - TELEGRAM_ALERTS_ENABLED=${TELEGRAM_ALERTS_ENABLED:-false}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - payment-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3500/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: payment-mysql
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+      - MYSQL_DATABASE=${DB_NAME:-2settle_db}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./src/services/payment-engine/migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "3307:3306"  # Expose on 3307 to avoid conflicts with local MySQL
+    networks:
+      - payment-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+# Networks & Volumes
+networks:
+  payment-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local

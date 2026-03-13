@@ -53,9 +53,6 @@ services:
       - TELEGRAM_ALERTS_ENABLED=${TELEGRAM_ALERTS_ENABLED:-false}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-    depends_on:
-      mysql:
-        condition: service_healthy
     networks:
       - payment-network
     healthcheck:
@@ -65,33 +62,8 @@ services:
       retries: 3
       start_period: 10s
 
-  # MySQL Database
-  mysql:
-    image: mysql:8.0
-    container_name: payment-mysql
-    restart: unless-stopped
-    environment:
-      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
-      - MYSQL_DATABASE=${DB_NAME:-2settle_db}
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./src/services/payment-engine/migrations:/docker-entrypoint-initdb.d:ro
-    ports:
-      - "3307:3306"  # Expose on 3307 to avoid conflicts with local MySQL
-    networks:
-      - payment-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
 
 # Networks & Volumes
 networks:
   payment-network:
     driver: bridge
-
-volumes:
-  mysql_data:
-    driver: local

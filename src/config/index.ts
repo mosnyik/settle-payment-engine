@@ -203,6 +203,7 @@ export const config = {
     // Paths that don't require HMAC authentication
     // (admin routes use separate Bearer token auth, webhooks use provider signatures)
     publicPaths: [
+      "/",
       "/v1/health",
       "/v1/rate/*",
       "/v1/banks/list",

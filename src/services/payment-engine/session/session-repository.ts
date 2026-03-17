@@ -29,6 +29,8 @@ export interface CreateSessionData {
   walletId?: number; // Deprecated: use derivationIndex
   derivationIndex?: number; // HD wallet derivation index
   hdChain?: HDChain; // HD wallet chain
+  fundingWalletIndex?: number;
+  parentWallet?: string;
   payerId?: number;
   receiverId?: number;
   merchantId?: string;
@@ -79,6 +81,8 @@ function rowToSession(row: any): PaymentSession {
     walletId: row.wallet_id ? Number(row.wallet_id) : undefined,
     derivationIndex: row.derivation_index ? Number(row.derivation_index) : undefined,
     hdChain: row.hd_chain as HDChain | undefined,
+    fundingWalletIndex: row.funding_wallet_index != null ? Number(row.funding_wallet_index) : undefined,
+    parentWallet: row.parent_wallet || undefined,
     payerId: row.payer_id ? Number(row.payer_id) : undefined,
     receiverId: row.receiver_id ? Number(row.receiver_id) : undefined,
     merchantId: row.merchant_id || undefined,
@@ -105,15 +109,15 @@ export class SessionRepository {
           fiat_amount, fiat_currency, crypto_amount, crypto, network,
           rate, asset_price, charge_amount,
           deposit_address, wallet_id, derivation_index, hd_chain,
+          funding_wallet_index, parent_wallet,
           payer_id, receiver_id, merchant_id,
           expires_at, created_at, updated_at,
           metadata
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.id,
           data.reference,
           data.type,
-          // Use 'created' status for requests without crypto (no deposit address yet)
           data.depositAddress ? 'pending' : 'created',
           data.fiatAmount,
           data.fiatCurrency,
@@ -127,6 +131,8 @@ export class SessionRepository {
           data.walletId || null,
           data.derivationIndex || null,
           data.hdChain || null,
+          data.fundingWalletIndex ?? null,
+          data.parentWallet ?? null,
           data.payerId || null,
           data.receiverId || null,
           data.merchantId || null,

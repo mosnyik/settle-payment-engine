@@ -21,9 +21,11 @@ This guide covers deploying the Payment Engine to a VPS using Docker.
 
 ## Prerequisites
 
-- A VPS (Bluehost, DigitalOcean, AWS, etc.) with Ubuntu 20.04+
+- A **VPS or dedicated server** plan — Docker does not work on shared hosting
+  - Bluehost VPS runs **AlmaLinux 9** (uses `yum`/`dnf`, not `apt`)
+  - DigitalOcean, AWS, Hetzner etc. typically run Ubuntu (uses `apt`)
 - A domain name pointed to your VPS IP
-- SSH access to your VPS
+- Terminal access via SSH **or** Bluehost's integrated cPanel Terminal
 
 ---
 
@@ -42,34 +44,81 @@ This guide covers deploying the Payment Engine to a VPS using Docker.
 
 ## VPS Initial Setup
 
-### 1. SSH into your VPS
+### 1. Connect to your VPS
+
+**Option A — SSH (recommended)**
 
 ```bash
 ssh root@your-vps-ip
 ```
 
+**Option B — Bluehost Integrated Terminal (no SSH client needed)**
+
+1. Log in to your Bluehost account at [bluehost.com](https://www.bluehost.com)
+2. Go to **Hosting** → select your hosting plan
+3. Open **cPanel** (button in the top right or sidebar)
+4. Scroll to the **Advanced** section and click **Terminal**
+5. A browser-based terminal opens — you are already logged in as your hosting user
+
+> **Requirements:** Docker deployment requires a **VPS or dedicated server** plan — it does **not** work on Bluehost shared hosting. Shared hosting restricts system-level access and cannot run Docker.
+>
+> **OS note:** Bluehost VPS runs **CentOS/AlmaLinux**, not Ubuntu. Replace all `apt` commands in this guide with `yum` (or `dnf`):
+> ```bash
+> # Instead of: apt update && apt upgrade -y
+> sudo yum update -y
+>
+> # Instead of: apt install docker-compose-plugin -y
+> sudo yum install docker-compose-plugin -y
+> ```
+>
+> The terminal runs as your cPanel user, not `root`. Use `sudo` for privileged commands, or `sudo -i` to open a root shell.
+
 ### 2. Update system packages
 
+**Ubuntu/Debian:**
 ```bash
 apt update && apt upgrade -y
 ```
 
+**AlmaLinux/CentOS (Bluehost VPS):**
+```bash
+yum update -y
+```
+
 ### 3. Install Docker
 
+**Ubuntu/Debian:**
 ```bash
 curl -fsSL https://get.docker.com | sh
 systemctl enable docker
 systemctl start docker
 ```
 
-### 4. Install Docker Compose
+**AlmaLinux/CentOS (Bluehost VPS):**
+
+> Avoid piping `curl` to `sh` on AlmaLinux — the subshell PATH may not include `/bin`, causing `systemctl` to fail mid-install. Use the package manager instead:
 
 ```bash
-apt install docker-compose-plugin -y
+yum install -y yum-utils
+yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+systemctl enable docker
+systemctl start docker
 
-# Verify installation
+# Verify
+docker --version
 docker compose version
 ```
+
+### 4. Install Docker Compose
+
+**Ubuntu/Debian:**
+```bash
+apt install docker-compose-plugin -y
+docker compose version
+```
+
+**AlmaLinux/CentOS (Bluehost VPS):** Already installed via `docker-compose-plugin` in step 3 — skip this step.
 
 ### 5. Clone your repository
 

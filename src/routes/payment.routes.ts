@@ -47,6 +47,18 @@ router.post(
 
     const input = parsed.data;
 
+    // Resolve parent wallet from API key for the requested chain
+    const apiKey = req.apiKey;
+    let parentWallet: string | undefined;
+    if (apiKey && input.network) {
+      const chain = input.network === 'bitcoin' ? 'bitcoin'
+        : (input.network === 'tron' || input.network === 'trc20') ? 'tron'
+        : 'ethereum';
+      parentWallet = (chain === 'bitcoin' ? apiKey.parentWalletBitcoin
+        : chain === 'tron' ? apiKey.parentWalletTron
+        : apiKey.parentWalletEthereum) ?? undefined;
+    }
+
     // Create payment session via PaymentEngine
     const session = await paymentEngine.createPayment({
       type: input.type,
@@ -64,6 +76,9 @@ router.post(
       merchantReference: input.merchantReference,
       callbackUrl: input.callbackUrl,
       metadata: input.metadata,
+      apiKeyId: apiKey?.id,
+      fundingWalletIndex: apiKey?.fundingWalletIndex ?? undefined,
+      parentWallet,
     });
 
     // Link participants if provided

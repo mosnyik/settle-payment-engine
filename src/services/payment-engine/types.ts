@@ -77,6 +77,10 @@ export interface CreatePaymentInput {
   merchantReference?: string;
   callbackUrl?: string;
   metadata?: Record<string, unknown>;
+  // Populated from API key at request time
+  apiKeyId?: number;
+  fundingWalletIndex?: number;
+  parentWallet?: string; // Chain-specific parent wallet address for sweep destination
 }
 
 // =============================================================================
@@ -110,6 +114,8 @@ export interface PaymentSession {
   walletId?: number; // Deprecated: use derivationIndex
   derivationIndex?: number; // HD wallet derivation index
   hdChain?: HDChain; // HD wallet chain
+  fundingWalletIndex?: number; // Merchant funding wallet index (for gas pre-funding)
+  parentWallet?: string; // Sweep destination (from API key's parent wallet for the chain)
   payerId?: number;
   receiverId?: number;
   merchantId?: string;

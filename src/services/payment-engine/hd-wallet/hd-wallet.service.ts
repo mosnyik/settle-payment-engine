@@ -15,8 +15,10 @@ import {
   HDWalletConfig,
   DerivedAddress,
   KeyMaterial,
+  MerchantFundingWallets,
   NETWORK_TO_HD_CHAIN,
   DERIVATION_PATHS,
+  MERCHANT_DERIVATION_PATHS,
 } from './types';
 import { Network } from '../types';
 
@@ -348,6 +350,140 @@ export class HDWalletService {
        ON DUPLICATE KEY UPDATE address = address`,
       [chain, derivationIndex, address]
     );
+  }
+
+  /**
+   * Allocate and derive a unique set of funding wallets for a new API key.
+   * Uses account index 1 (separate namespace from payment deposit wallets).
+   * Atomically increments merchant_wallet_config.next_index.
+   */
+  async allocateMerchantFundingWallets(): Promise<MerchantFundingWallets> {
+    this.ensureInitialized();
+    const pool = (await import('../../../lib/mysql')).default;
+    const connection = await pool.getConnection();
+
+    let merchantIndex: number;
+    try {
+      await connection.beginTransaction();
+      const [rows] = await connection.query(
+        'SELECT next_index FROM merchant_wallet_config WHERE id = 1 FOR UPDATE'
+      ) as [any[], any];
+
+      if (!rows || rows.length === 0) {
+        throw new HDWalletError('merchant_wallet_config not initialized. Run migration 002_add_merchant_wallets.sql');
+      }
+
+      merchantIndex = Number(rows[0].next_index);
+      await connection.query(
+        'UPDATE merchant_wallet_config SET next_index = next_index + 1 WHERE id = 1'
+      );
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    return {
+      index: merchantIndex,
+      bitcoin: this.deriveMerchantAddress('bitcoin', merchantIndex),
+      ethereum: this.deriveMerchantAddress('ethereum', merchantIndex),
+      tron: this.deriveMerchantAddress('tron', merchantIndex),
+    };
+  }
+
+  /**
+   * Get the private key for a merchant funding wallet.
+   * Used by sweeper to sign gas pre-funding transactions.
+   */
+  getMerchantFundingPrivateKey(chain: HDChain, merchantIndex: number): string {
+    this.ensureInitialized();
+    return this.deriveMerchantKey(chain, merchantIndex).privateKey;
+  }
+
+  /**
+   * Derive the address for a merchant funding wallet (account index 1).
+   */
+  private deriveMerchantAddress(chain: HDChain, index: number): string {
+    return this.deriveMerchantKey(chain, index).address;
+  }
+
+  /**
+   * Derive key material for a merchant funding wallet using account index 1 paths.
+   */
+  private deriveMerchantKey(chain: HDChain, index: number): KeyMaterial {
+    const basePath = MERCHANT_DERIVATION_PATHS[chain];
+    const fullPath = `${basePath}/${index}`;
+
+    if (chain === 'ethereum') {
+      const { HDNodeWallet } = require('ethers');
+      const seedHex = Buffer.from(this.seed!).toString('hex');
+      const derived = HDNodeWallet.fromSeed(`0x${seedHex}`).derivePath(fullPath);
+      return {
+        privateKey: derived.privateKey.slice(2),
+        publicKey: derived.publicKey.slice(2),
+        address: derived.address,
+      };
+    }
+
+    if (chain === 'bitcoin' || chain === 'tron') {
+      const { HDKey } = require('@scure/bip32');
+      const masterKey = HDKey.fromMasterSeed(this.seed!);
+      const derived = masterKey.derive(fullPath);
+
+      if (!derived.privateKey || !derived.publicKey) {
+        throw new HDWalletError(`Failed to derive ${chain} merchant key at index ${index}`);
+      }
+
+      if (chain === 'bitcoin') {
+        const btc = require('@scure/btc-signer');
+        const address = btc.p2wpkh(derived.publicKey).address!;
+        return {
+          privateKey: Buffer.from(derived.privateKey).toString('hex'),
+          publicKey: Buffer.from(derived.publicKey).toString('hex'),
+          address,
+        };
+      }
+
+      // Tron: derive address from public key
+      const { secp256k1 } = require('@noble/curves/secp256k1');
+      const { keccak_256 } = require('@noble/hashes/sha3');
+      const { createHash } = require('crypto');
+
+      const privKey = derived.privateKey;
+      const pubKeyFull = secp256k1.getPublicKey(privKey, false); // uncompressed
+      const pubKeyBody = pubKeyFull.slice(1); // remove 04 prefix
+      const hash = keccak_256(pubKeyBody);
+      const tronBytes = new Uint8Array(21);
+      tronBytes[0] = 0x41; // Tron mainnet prefix
+      tronBytes.set(hash.slice(12), 1);
+
+      // Base58Check
+      const sha256 = (d: Uint8Array) => createHash('sha256').update(d).digest();
+      const checksum = sha256(sha256(tronBytes)).slice(0, 4);
+      const withChecksum = Buffer.concat([tronBytes, checksum]);
+      const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+      let num = BigInt('0x' + withChecksum.toString('hex'));
+      let address = '';
+      while (num > 0n) {
+        address = BASE58[Number(num % 62n)] + address;
+        num /= 62n;
+      }
+      // Pad leading 1s for zero bytes
+      for (const byte of withChecksum) {
+        if (byte !== 0) break;
+        address = '1' + address;
+      }
+
+      return {
+        privateKey: Buffer.from(privKey).toString('hex'),
+        publicKey: Buffer.from(derived.publicKey).toString('hex'),
+        address,
+      };
+    }
+
+    throw new HDWalletError(`Unsupported chain: ${chain}`);
   }
 
   /**

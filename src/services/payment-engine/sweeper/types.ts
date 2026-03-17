@@ -21,8 +21,10 @@ export interface SweepRequest {
   amount: string;
   cryptoCurrency: CryptoCurrency;
   tokenContract?: string;
-  /** Optional custom destination (for HDWaaS). If not provided, uses hot wallet. */
+  /** Sweep destination — parent wallet (payment) or developer wallet (HDWaaS). Falls back to hot wallet. */
   toAddress?: string;
+  /** Merchant funding wallet index — used to derive private key for gas pre-funding. */
+  fundingWalletIndex?: number;
 }
 
 /** Result of a sweep operation */

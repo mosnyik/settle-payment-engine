@@ -7,6 +7,7 @@ import {
   AuthenticationError,
 } from '../types';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
+import { getHDWalletService } from '../../services/payment-engine/hd-wallet';
 
 /**
  * API Key Service
@@ -30,6 +31,14 @@ interface ApiKeyRow extends RowDataPacket {
   webhook_url: string | null;
   webhook_secret: string | null;
   sweep_address: string | null;
+  // Per-key merchant wallets
+  funding_wallet_index: number | null;
+  funding_wallet_bitcoin: string | null;
+  funding_wallet_ethereum: string | null;
+  funding_wallet_tron: string | null;
+  parent_wallet_bitcoin: string | null;
+  parent_wallet_ethereum: string | null;
+  parent_wallet_tron: string | null;
 }
 
 /**
@@ -68,6 +77,13 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
     webhookUrl: row.webhook_url,
     webhookSecret: row.webhook_secret,
     sweepAddress: row.sweep_address,
+    fundingWalletIndex: row.funding_wallet_index ?? null,
+    fundingWalletBitcoin: row.funding_wallet_bitcoin ?? null,
+    fundingWalletEthereum: row.funding_wallet_ethereum ?? null,
+    fundingWalletTron: row.funding_wallet_tron ?? null,
+    parentWalletBitcoin: row.parent_wallet_bitcoin ?? null,
+    parentWalletEthereum: row.parent_wallet_ethereum ?? null,
+    parentWalletTron: row.parent_wallet_tron ?? null,
   };
 }
 
@@ -82,9 +98,31 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWith
   // Generate webhook secret if webhook URL is provided
   const webhookSecret = input.webhookUrl ? generateWebhookSecret() : null;
 
+  // Allocate merchant funding wallets if HD wallet is enabled
+  let fundingWalletIndex: number | null = null;
+  let fundingWalletBitcoin: string | null = null;
+  let fundingWalletEthereum: string | null = null;
+  let fundingWalletTron: string | null = null;
+
+  const hdWallet = getHDWalletService();
+  if (hdWallet?.isEnabled()) {
+    try {
+      const wallets = await hdWallet.allocateMerchantFundingWallets();
+      fundingWalletIndex = wallets.index;
+      fundingWalletBitcoin = wallets.bitcoin;
+      fundingWalletEthereum = wallets.ethereum;
+      fundingWalletTron = wallets.tron;
+    } catch (err) {
+      console.warn('[ApiKey] Failed to allocate merchant funding wallets:', err);
+    }
+  }
+
   const [result] = await pool.query<ResultSetHeader>(
-    `INSERT INTO api_keys (key_id, key_hash, merchant_id, name, permissions, rate_limit_tier, ip_whitelist, expires_at, webhook_url, webhook_secret, sweep_address)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO api_keys (
+      key_id, key_hash, merchant_id, name, permissions, rate_limit_tier,
+      ip_whitelist, expires_at, webhook_url, webhook_secret, sweep_address,
+      funding_wallet_index, funding_wallet_bitcoin, funding_wallet_ethereum, funding_wallet_tron
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       keyId,
       keyHash,
@@ -97,6 +135,10 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWith
       input.webhookUrl || null,
       webhookSecret,
       input.sweepAddress || null,
+      fundingWalletIndex,
+      fundingWalletBitcoin,
+      fundingWalletEthereum,
+      fundingWalletTron,
     ]
   );
 
@@ -353,6 +395,46 @@ export async function getWebhookConfig(apiKeyId: number): Promise<{
     webhookSecret: rows[0].webhook_secret,
     sweepAddress: rows[0].sweep_address,
   };
+}
+
+/**
+ * Update parent wallet addresses for an API key (user-provided sweep destinations)
+ */
+export async function updateParentWallets(
+  keyId: string,
+  wallets: {
+    bitcoin?: string | null;
+    ethereum?: string | null;
+    tron?: string | null;
+  }
+): Promise<ApiKey | null> {
+  const setClauses: string[] = [];
+  const values: unknown[] = [];
+
+  if (wallets.bitcoin !== undefined) {
+    setClauses.push('parent_wallet_bitcoin = ?');
+    values.push(wallets.bitcoin);
+  }
+  if (wallets.ethereum !== undefined) {
+    setClauses.push('parent_wallet_ethereum = ?');
+    values.push(wallets.ethereum);
+  }
+  if (wallets.tron !== undefined) {
+    setClauses.push('parent_wallet_tron = ?');
+    values.push(wallets.tron);
+  }
+
+  if (setClauses.length === 0) {
+    return getApiKeyByKeyId(keyId);
+  }
+
+  values.push(keyId);
+  await pool.query(
+    `UPDATE api_keys SET ${setClauses.join(', ')} WHERE key_id = ?`,
+    values
+  );
+
+  return getApiKeyByKeyId(keyId);
 }
 
 /**

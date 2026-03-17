@@ -136,6 +136,11 @@ export class SweeperService {
     // Get token contract if needed
     const tokenContract = this.getTokenContract(request.network, request.cryptoCurrency);
 
+    // Pre-fund gas from hot wallet if this is a token sweep
+    if (tokenContract) {
+      await this.ensureGasForTokenSweep(request);
+    }
+
     // Execute sweep
     const result = await sweeper.sweep({
       fromAddress: request.fromAddress,
@@ -450,6 +455,116 @@ export class SweeperService {
       submittedAt: row.submitted_at ? new Date(row.submitted_at) : null,
       confirmedAt: row.confirmed_at ? new Date(row.confirmed_at) : null,
     };
+  }
+
+  /**
+   * Ensure the child address has enough native coin to pay gas for a token sweep.
+   * Gas is paid by the merchant's funding wallet (derived from HD seed at merchant index).
+   */
+  private async ensureGasForTokenSweep(request: SweepRequest): Promise<void> {
+    if (request.fundingWalletIndex == null) {
+      console.warn('[Sweeper] No fundingWalletIndex on sweep request — skipping gas pre-fund');
+      return;
+    }
+
+    const hdWallet = getHDWalletService();
+    if (!hdWallet?.isEnabled()) {
+      console.warn('[Sweeper] HD Wallet not enabled — skipping gas pre-fund');
+      return;
+    }
+
+    if (request.chain === 'ethereum') {
+      const isBsc = request.network === 'bsc' || request.network === 'bep20';
+      const rpcUrl = isBsc ? this.config.rpc.bsc : this.config.rpc.ethereum;
+      const chainId = isBsc ? 56 : 1;
+      const fundingKey = hdWallet.getMerchantFundingPrivateKey('ethereum', request.fundingWalletIndex);
+      await this.prefundEVMGas(request.fromAddress, fundingKey, rpcUrl, chainId);
+
+    } else if (request.chain === 'tron') {
+      const fundingKey = hdWallet.getMerchantFundingPrivateKey('tron', request.fundingWalletIndex);
+      await this.prefundTronGas(request.fromAddress, fundingKey);
+    }
+  }
+
+  /**
+   * Pre-fund an EVM child address with enough ETH/BNB to cover token transfer gas.
+   */
+  private async prefundEVMGas(
+    childAddress: string,
+    hotWalletPrivateKey: string,
+    rpcUrl: string,
+    chainId: number,
+  ): Promise<void> {
+    const { JsonRpcProvider, Wallet, formatUnits } = await import('ethers');
+
+    const provider = new JsonRpcProvider(rpcUrl);
+    const hotWallet = new Wallet(hotWalletPrivateKey, provider);
+
+    const childBalance = await provider.getBalance(childAddress);
+    const feeData = await provider.getFeeData();
+    const gasPrice = feeData.maxFeePerGas || feeData.gasPrice || 0n;
+    const gasLimit = 75000n; // ERC20 transfer + 15% buffer
+    const required = gasLimit * gasPrice;
+
+    if (childBalance >= required) {
+      return; // Already has enough
+    }
+
+    const deficit = required - childBalance;
+
+    console.log(
+      `[Sweeper] Pre-funding ${childAddress} with ${formatUnits(deficit, 'ether')} native coin (chainId ${chainId})`
+    );
+
+    const tx = await hotWallet.sendTransaction({
+      to: childAddress,
+      value: deficit,
+      chainId,
+    });
+
+    await tx.wait();
+    console.log(`[Sweeper] EVM gas pre-fund confirmed: ${tx.hash}`);
+  }
+
+  /**
+   * Pre-fund a Tron child address with enough TRX to cover TRC20 transfer energy.
+   */
+  private async prefundTronGas(
+    childAddress: string,
+    hotWalletPrivateKey: string,
+  ): Promise<void> {
+    const TronWebClass = (await import('tronweb')).default;
+    const SUN_PER_TRX = 1_000_000;
+    const MIN_TRX = 10 * SUN_PER_TRX; // 10 TRX in sun
+
+    const tronWeb = new TronWebClass({
+      fullHost: 'https://api.trongrid.io',
+      privateKey: hotWalletPrivateKey,
+    });
+
+    const childBalance = await tronWeb.trx.getBalance(childAddress);
+
+    if (childBalance >= MIN_TRX) {
+      return; // Already has enough
+    }
+
+    const deficit = MIN_TRX - childBalance;
+    const hotWalletAddress = tronWeb.address.fromPrivateKey(hotWalletPrivateKey);
+
+    console.log(`[Sweeper] Pre-funding ${childAddress} with ${deficit / SUN_PER_TRX} TRX for energy`);
+
+    const tx = await tronWeb.transactionBuilder.sendTrx(childAddress, deficit, hotWalletAddress);
+    const signed = await tronWeb.trx.sign(tx);
+    const result = await tronWeb.trx.sendRawTransaction(signed);
+
+    if (!result.result) {
+      throw new Error(`[Sweeper] Tron gas pre-fund failed: ${result.message}`);
+    }
+
+    console.log(`[Sweeper] Tron gas pre-fund submitted: ${result.txid}`);
+
+    // Allow a few seconds for the tx to be picked up before sweeping
+    await new Promise(resolve => setTimeout(resolve, 4000));
   }
 
   /**

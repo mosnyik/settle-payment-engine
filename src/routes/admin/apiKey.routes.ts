@@ -5,6 +5,7 @@ import {
   getApiKeyByKeyId,
   listApiKeysByMerchant,
   updateApiKey,
+  updateParentWallets,
   revokeApiKey,
 } from '../../security/services/apiKey.service';
 import { RateLimitTier } from '../../security/types';
@@ -222,6 +223,94 @@ router.delete('/:keyId', async (req: Request, res: Response, next: NextFunction)
     return res.status(200).json({
       status: true,
       message: 'API key revoked successfully',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =============================================================================
+// WALLET MANAGEMENT
+// =============================================================================
+
+const updateParentWalletsSchema = z.object({
+  bitcoin: z.string().min(1).optional().nullable(),
+  ethereum: z.string().min(1).optional().nullable(),
+  tron: z.string().min(1).optional().nullable(),
+});
+
+/**
+ * GET /admin/api-keys/:keyId/wallets
+ * View funding (system-derived) and parent (user-provided) wallets for a key
+ */
+router.get('/:keyId/wallets', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const apiKey = await getApiKeyByKeyId(req.params.keyId);
+    if (!apiKey) {
+      return res.status(404).json({ error: 'API key not found', code: 'API_KEY_NOT_FOUND' });
+    }
+
+    return res.status(200).json({
+      status: true,
+      data: {
+        funding: {
+          index: apiKey.fundingWalletIndex,
+          bitcoin: apiKey.fundingWalletBitcoin,
+          ethereum: apiKey.fundingWalletEthereum,
+          tron: apiKey.fundingWalletTron,
+          note: 'System-derived wallets. Top these up with native coin (ETH/BNB/TRX) so they can pre-fund gas for token sweeps.',
+        },
+        parent: {
+          bitcoin: apiKey.parentWalletBitcoin,
+          ethereum: apiKey.parentWalletEthereum,
+          tron: apiKey.parentWalletTron,
+          note: 'Your provided destination wallets. Swept funds are sent here.',
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PUT /admin/api-keys/:keyId/wallets
+ * Set parent wallet addresses (sweep destinations)
+ *
+ * Body: { "bitcoin": "bc1q...", "ethereum": "0x...", "tron": "T..." }
+ */
+router.put('/:keyId/wallets', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { keyId } = req.params;
+
+    const parsed = updateParentWalletsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        code: 'VALIDATION_ERROR',
+        details: parsed.error.flatten(),
+      });
+    }
+
+    const existing = await getApiKeyByKeyId(keyId);
+    if (!existing) {
+      return res.status(404).json({ error: 'API key not found', code: 'API_KEY_NOT_FOUND' });
+    }
+
+    const updated = await updateParentWallets(keyId, {
+      bitcoin: parsed.data.bitcoin,
+      ethereum: parsed.data.ethereum,
+      tron: parsed.data.tron,
+    });
+
+    return res.status(200).json({
+      status: true,
+      message: 'Parent wallets updated successfully',
+      data: {
+        parentWalletBitcoin: updated?.parentWalletBitcoin,
+        parentWalletEthereum: updated?.parentWalletEthereum,
+        parentWalletTron: updated?.parentWalletTron,
+      },
     });
   } catch (err) {
     next(err);

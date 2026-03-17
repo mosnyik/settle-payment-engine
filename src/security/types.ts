@@ -26,6 +26,14 @@ export interface ApiKey {
   webhookUrl: string | null;
   webhookSecret: string | null;
   sweepAddress: string | null;
+  // Per-key merchant wallets
+  fundingWalletIndex: number | null;
+  fundingWalletBitcoin: string | null;
+  fundingWalletEthereum: string | null;
+  fundingWalletTron: string | null;
+  parentWalletBitcoin: string | null;
+  parentWalletEthereum: string | null;
+  parentWalletTron: string | null;
 }
 
 export interface CreateApiKeyInput {

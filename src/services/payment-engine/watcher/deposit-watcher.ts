@@ -825,6 +825,8 @@ export class DepositWatcher extends EventEmitter {
               amount: tx.amountDecimal.toString(),
               cryptoCurrency: session.cryptoCurrency,
               tokenContract: tx.tokenAddress,
+              fundingWalletIndex: session.fundingWalletIndex,
+              toAddress: session.parentWallet,
             }).then(result => {
               if (result.success) {
                 console.log(`[DepositWatcher] Sweep initiated for session ${session.id.slice(0, 8)}...: ${result.txHash}`);

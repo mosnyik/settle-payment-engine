@@ -108,3 +108,18 @@ export interface HotWalletAddresses {
   ethereum: string;
   tron: string;
 }
+
+/** Merchant funding wallets — derived at account index 1, one set per API key */
+export interface MerchantFundingWallets {
+  index: number;
+  bitcoin: string;  // bc1q...
+  ethereum: string; // 0x... (covers BSC too)
+  tron: string;     // T...
+}
+
+/** Derivation path bases for merchant funding wallets (account index 1) */
+export const MERCHANT_DERIVATION_PATHS: Record<HDChain, string> = {
+  bitcoin:  "m/84'/0'/1'/0",
+  ethereum: "m/44'/60'/1'/0",
+  tron:     "m/44'/195'/1'/0",
+};

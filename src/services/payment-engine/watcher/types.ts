@@ -118,6 +118,8 @@ export interface WatchedSession {
   walletId?: number; // Deprecated: use derivationIndex
   derivationIndex?: number; // HD wallet derivation index
   hdChain?: HDChain; // HD wallet chain (for sweeper)
+  fundingWalletIndex?: number; // For gas pre-funding on token sweeps
+  toAddress?: string; // Sweep destination — falls back to hot wallet if absent
   status: 'pending' | 'confirming';
   txHash?: string;
   expiresAt: Date;

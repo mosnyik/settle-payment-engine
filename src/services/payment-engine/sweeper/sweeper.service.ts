@@ -533,7 +533,7 @@ export class SweeperService {
     childAddress: string,
     hotWalletPrivateKey: string,
   ): Promise<void> {
-    const TronWebClass = (await import('tronweb')).default;
+    const TronWebClass = (await import('tronweb')).default as any;
     const SUN_PER_TRX = 1_000_000;
     const MIN_TRX = 10 * SUN_PER_TRX; // 10 TRX in sun
 

@@ -247,6 +247,8 @@ export class SessionManager {
         walletId: session.walletId,
         derivationIndex: session.derivationIndex,
         hdChain: session.hdChain,
+        fundingWalletIndex: session.fundingWalletIndex,
+        toAddress: session.parentWallet,
         expiresAt: session.expiresAt,
       });
     }
@@ -527,14 +529,16 @@ export class SessionManager {
     if (watcher?.isActive()) {
       watcher.watch({
         sessionId: updatedSession.id,
-        depositAddress: depositAddress, // Use local var - guaranteed non-null
-        network: network as any, // Use local var - guaranteed non-null
-        cryptoCurrency: crypto as any, // Use local var - guaranteed non-null
-        expectedAmount: charges.totalCryptoAmount, // Use local var
+        depositAddress: depositAddress,
+        network: network as any,
+        cryptoCurrency: crypto as any,
+        expectedAmount: charges.totalCryptoAmount,
         walletId: updatedSession.walletId,
         derivationIndex: updatedSession.derivationIndex,
         hdChain: updatedSession.hdChain,
-        expiresAt: expiresAt, // Use local var
+        fundingWalletIndex: updatedSession.fundingWalletIndex,
+        toAddress: updatedSession.parentWallet,
+        expiresAt: expiresAt,
       });
     }
 

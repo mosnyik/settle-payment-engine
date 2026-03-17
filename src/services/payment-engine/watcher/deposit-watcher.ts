@@ -246,6 +246,8 @@ export class DepositWatcher extends EventEmitter {
     walletId?: number; // Deprecated: use derivationIndex
     derivationIndex?: number; // HD wallet derivation index
     hdChain?: HDChain; // HD wallet chain (for sweeper)
+    fundingWalletIndex?: number;
+    toAddress?: string;
     expiresAt: Date;
   }): void {
     const chain = NETWORK_TO_WATCHABLE_CHAIN[params.network];
@@ -260,6 +262,8 @@ export class DepositWatcher extends EventEmitter {
       walletId: params.walletId,
       derivationIndex: params.derivationIndex,
       hdChain: params.hdChain,
+      fundingWalletIndex: params.fundingWalletIndex,
+      toAddress: params.toAddress,
       status: 'pending',
       expiresAt: params.expiresAt,
     };
@@ -826,7 +830,7 @@ export class DepositWatcher extends EventEmitter {
               cryptoCurrency: session.cryptoCurrency,
               tokenContract: tx.tokenAddress,
               fundingWalletIndex: session.fundingWalletIndex,
-              toAddress: session.parentWallet,
+              toAddress: session.toAddress,
             }).then(result => {
               if (result.success) {
                 console.log(`[DepositWatcher] Sweep initiated for session ${session.id.slice(0, 8)}...: ${result.txHash}`);

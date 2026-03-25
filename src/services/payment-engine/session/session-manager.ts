@@ -156,6 +156,7 @@ export class SessionManager {
         chargeAmount: undefined,
         depositAddress: undefined,
         merchantId: input.merchantId,
+        apiKeyId: input.apiKeyId,
         fundingWalletIndex: input.fundingWalletIndex,
         parentWallet: input.parentWallet,
         expiresAt,
@@ -223,6 +224,7 @@ export class SessionManager {
       fundingWalletIndex: input.fundingWalletIndex,
       parentWallet: input.parentWallet,
       merchantId: input.merchantId,
+      apiKeyId: input.apiKeyId,
       expiresAt,
       metadata: input.metadata,
     };

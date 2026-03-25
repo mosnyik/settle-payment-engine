@@ -119,6 +119,7 @@ export interface PaymentSession {
   payerId?: number;
   receiverId?: number;
   merchantId?: string;
+  apiKeyId?: number;
   txHash?: string;
   confirmations?: number;
   receivedAmount?: number;

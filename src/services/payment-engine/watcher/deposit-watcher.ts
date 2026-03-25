@@ -34,6 +34,7 @@ import { getProcessedTxStore } from './state';
 import * as walletService from '../../wallet-api/wallet.service';
 import { sendWebhook } from '../../wallet-api/webhook.service';
 import { getWebhookConfig } from '../../../security/services/apiKey.service';
+import { sendPaymentWebhook } from '../payment-webhook.service';
 
 // =============================================================================
 // TYPES
@@ -682,6 +683,8 @@ export class DepositWatcher extends EventEmitter {
       try {
         await sessionManager.markDeposit(session.id, tx.txHash, tx.amountDecimal);
 
+        sendPaymentWebhook(session.id, 'payment.confirming').catch(() => {});
+
         await txStore.markProcessed({
           txHash: tx.txHash,
           sessionId: session.id,
@@ -789,6 +792,8 @@ export class DepositWatcher extends EventEmitter {
       // Confirmed!
       try {
         await sessionManager.confirmDeposit(session.id, tx.confirmations);
+
+        sendPaymentWebhook(session.id, 'payment.confirmed').catch(() => {});
 
         await txStore.markProcessed({
           txHash: tx.txHash,

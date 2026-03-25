@@ -9,6 +9,7 @@ import config from '../../../config';
 import { pool } from '../../../lib/mysql';
 import { MongoroService, mongoroService } from './mongoro.service';
 import { TelegramService, telegramService, SessionAlertData } from './telegram.service';
+import { sendPaymentWebhook } from '../payment-webhook.service';
 import {
   SettlementConfig,
   SettlementAttempt,
@@ -99,6 +100,7 @@ export class SettlementService {
 
     // 3. Update status to settling
     await this.updateSessionStatus(sessionId, 'settling');
+    sendPaymentWebhook(sessionId, 'payment.settling').catch(() => {});
 
     // 4. Create settlement attempt record
     const attemptData: CreateSettlementAttemptData = {
@@ -180,6 +182,7 @@ export class SettlementService {
       // Both Mongoro AND Telegram failed - mark as failed
       console.error(`[Settlement] Both Mongoro and Telegram failed for ${session.reference}, marking as failed`);
       await this.updateSessionStatus(session.id, 'failed');
+      sendPaymentWebhook(session.id, 'payment.failed').catch(() => {});
     }
   }
 
@@ -221,10 +224,12 @@ export class SettlementService {
     if (status === 'success') {
       // Mark session as settled
       await this.markSessionSettled(session.id);
+      sendPaymentWebhook(session.id, 'payment.settled').catch(() => {});
       console.log(`[Settlement] Completed for ${session.reference}`);
     } else if (status === 'reversed' || status === 'failed') {
       // Mark as reversed and send alert
       await this.updateSessionStatus(session.id, 'settlement_reversed');
+      sendPaymentWebhook(session.id, 'payment.settlement_reversed').catch(() => {});
 
       const sessionData = await this.getSession(session.id);
       if (sessionData) {
@@ -257,6 +262,7 @@ export class SettlementService {
     }
 
     await this.markSessionSettled(session.id);
+    sendPaymentWebhook(session.id, 'payment.settled').catch(() => {});
 
     // Record manual settlement attempt
     await this.createSettlementAttempt({

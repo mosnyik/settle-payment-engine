@@ -34,6 +34,7 @@ export interface CreateSessionData {
   payerId?: number;
   receiverId?: number;
   merchantId?: string;
+  apiKeyId?: number;
   expiresAt: Date;
   metadata?: Record<string, unknown>;
 }
@@ -86,6 +87,7 @@ function rowToSession(row: any): PaymentSession {
     payerId: row.payer_id ? Number(row.payer_id) : undefined,
     receiverId: row.receiver_id ? Number(row.receiver_id) : undefined,
     merchantId: row.merchant_id || undefined,
+    apiKeyId: row.api_key_id ? Number(row.api_key_id) : undefined,
     txHash: row.tx_hash || undefined,
     confirmations: row.confirmations ? Number(row.confirmations) : undefined,
     receivedAmount: row.received_amount ? Number(row.received_amount) : undefined,
@@ -110,10 +112,10 @@ export class SessionRepository {
           rate, asset_price, charge_amount,
           deposit_address, wallet_id, derivation_index, hd_chain,
           funding_wallet_index, parent_wallet,
-          payer_id, receiver_id, merchant_id,
+          payer_id, receiver_id, merchant_id, api_key_id,
           expires_at, created_at, updated_at,
           metadata
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.id,
           data.reference,
@@ -136,6 +138,7 @@ export class SessionRepository {
           data.payerId || null,
           data.receiverId || null,
           data.merchantId || null,
+          data.apiKeyId || null,
           data.expiresAt,
           now,
           now,

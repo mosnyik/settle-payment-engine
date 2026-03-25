@@ -16,6 +16,7 @@ import {
 } from '../validation/payment.schemas';
 import { PaymentEngineError } from '../services/payment-engine/errors';
 import { requirePermission } from '../security/middleware/authenticate';
+import { settlementService } from '../services/payment-engine/settlement/settlement.service';
 
 const router = Router();
 
@@ -357,6 +358,45 @@ router.post(
           payerId: updatedSession.payerId,
         },
       });
+    } catch (err) {
+      if (err instanceof PaymentEngineError) {
+        return res.status(err.statusCode).json({
+          success: false,
+          error: err.message,
+          code: err.code,
+        });
+      }
+      next(err);
+    }
+  }
+);
+
+// =============================================================================
+// CONFIRM SELF-SETTLEMENT
+// =============================================================================
+
+/**
+ * POST /payments/:reference/settle
+ *
+ * For integrators using settlementMode='self'.
+ * Call this after you have sent the fiat to the receiver to mark the payment settled.
+ * Requires 'payment:create' permission (same API key that created the payment).
+ */
+router.post(
+  '/:reference/settle',
+  requirePermission('payment:create'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { reference } = req.params;
+      const { settlementReference } = req.body as { settlementReference?: string };
+
+      const result = await settlementService.confirmSelfSettlement(reference, settlementReference);
+
+      if (!result.success) {
+        return res.status(400).json({ success: false, error: result.message });
+      }
+
+      return res.json({ success: true, message: result.message });
     } catch (err) {
       if (err instanceof PaymentEngineError) {
         return res.status(err.statusCode).json({

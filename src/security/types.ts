@@ -26,6 +26,7 @@ export interface ApiKey {
   webhookUrl: string | null;
   webhookSecret: string | null;
   sweepAddress: string | null;
+  settlementMode: 'mongoro' | 'self';
   // Per-key merchant wallets
   fundingWalletIndex: number | null;
   fundingWalletBitcoin: string | null;
@@ -46,6 +47,7 @@ export interface CreateApiKeyInput {
   // Wallet-as-a-Service fields
   webhookUrl?: string;
   sweepAddress?: string;
+  settlementMode?: 'mongoro' | 'self';
 }
 
 export interface ApiKeyWithSecret {

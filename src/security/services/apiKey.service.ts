@@ -31,6 +31,7 @@ interface ApiKeyRow extends RowDataPacket {
   webhook_url: string | null;
   webhook_secret: string | null;
   sweep_address: string | null;
+  settlement_mode: 'mongoro' | 'self';
   // Per-key merchant wallets
   funding_wallet_index: number | null;
   funding_wallet_bitcoin: string | null;
@@ -77,6 +78,7 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
     webhookUrl: row.webhook_url,
     webhookSecret: row.webhook_secret,
     sweepAddress: row.sweep_address,
+    settlementMode: row.settlement_mode ?? 'self',
     fundingWalletIndex: row.funding_wallet_index ?? null,
     fundingWalletBitcoin: row.funding_wallet_bitcoin ?? null,
     fundingWalletEthereum: row.funding_wallet_ethereum ?? null,
@@ -121,8 +123,9 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWith
     `INSERT INTO api_keys (
       key_id, key_hash, merchant_id, name, permissions, rate_limit_tier,
       ip_whitelist, expires_at, webhook_url, webhook_secret, sweep_address,
+      settlement_mode,
       funding_wallet_index, funding_wallet_bitcoin, funding_wallet_ethereum, funding_wallet_tron
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       keyId,
       keyHash,
@@ -135,6 +138,7 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWith
       input.webhookUrl || null,
       webhookSecret,
       input.sweepAddress || null,
+      input.settlementMode || 'self',
       fundingWalletIndex,
       fundingWalletBitcoin,
       fundingWalletEthereum,
@@ -293,6 +297,7 @@ export async function updateApiKey(
     ipWhitelist?: string[] | null;
     webhookUrl?: string | null;
     sweepAddress?: string | null;
+    settlementMode?: 'mongoro' | 'self';
   }
 ): Promise<ApiKey | null> {
   const setClauses: string[] = [];
@@ -331,6 +336,11 @@ export async function updateApiKey(
   if (updates.sweepAddress !== undefined) {
     setClauses.push('sweep_address = ?');
     values.push(updates.sweepAddress);
+  }
+
+  if (updates.settlementMode !== undefined) {
+    setClauses.push('settlement_mode = ?');
+    values.push(updates.settlementMode);
   }
 
   if (setClauses.length === 0) {

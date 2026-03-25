@@ -16,6 +16,7 @@ import {
   CreateSettlementAttemptData,
   MongoroWebhookPayload,
 } from './types';
+import { getApiKeyById } from '../../../security/services/apiKey.service';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 
 interface ReceiverRow extends RowDataPacket {
@@ -40,6 +41,7 @@ interface SessionRow extends RowDataPacket {
   fiat_amount: number;
   fiat_currency: string;
   receiver_id: number | null;
+  api_key_id: number | null;
 }
 
 export class SettlementService {
@@ -98,11 +100,30 @@ export class SettlementService {
       return;
     }
 
-    // 3. Update status to settling
+    // 3. Determine settlement mode from the API key that created this session
+    const settlementMode = await this.getSettlementMode(session.api_key_id);
+
+    // 4. Update status to settling
     await this.updateSessionStatus(sessionId, 'settling');
     sendPaymentWebhook(sessionId, 'payment.settling').catch(() => {});
 
-    // 4. Create settlement attempt record
+    if (settlementMode === 'self') {
+      // Self-settlement: notify the integrator via webhook and wait for them to call /settle
+      await this.createSettlementAttempt({
+        sessionId,
+        provider: 'self',
+        status: 'pending',
+        amount: session.fiat_amount,
+        accountNumber: receiver.accountNumber,
+        bankCode: receiver.bankCode,
+        accountName: receiver.accountName,
+      });
+
+      console.log(`[Settlement] Self-settlement mode for ${session.reference} — awaiting integrator callback`);
+      return;
+    }
+
+    // 5. Mongoro mode: create attempt record
     const attemptData: CreateSettlementAttemptData = {
       sessionId,
       provider: 'mongoro',
@@ -115,7 +136,7 @@ export class SettlementService {
 
     const attemptId = await this.createSettlementAttempt(attemptData);
 
-    // 5. Call Mongoro API
+    // 6. Call Mongoro API
     const narration = `2Settle ${session.reference}`;
     const response = await this.mongoro.transfer(
       receiver.accountNumber,
@@ -127,9 +148,8 @@ export class SettlementService {
       session.fiat_currency
     );
 
-    // 6. Handle response
+    // 7. Handle response
     if (response.success && response.data?.reference) {
-      // Success - save reference and wait for webhook
       await this.updateSettlementAttempt(attemptId, {
         status: 'pending', // Still pending until webhook confirms
         reference: response.data.reference,
@@ -140,7 +160,6 @@ export class SettlementService {
 
       console.log(`[Settlement] Initiated for ${session.reference}, ref: ${response.data.reference}`);
     } else {
-      // Failure - send Telegram alert
       await this.updateSettlementAttempt(attemptId, {
         status: 'failed',
         errorMessage: response.message,
@@ -149,6 +168,55 @@ export class SettlementService {
 
       await this.handleSettlementFailure(session, receiver, response.message);
     }
+  }
+
+  /**
+   * Confirm settlement for self-settlement mode.
+   * Called by the integrator after they have sent the fiat to the receiver.
+   */
+  async confirmSelfSettlement(
+    reference: string,
+    settlementReference?: string
+  ): Promise<{ success: boolean; message: string }> {
+    const session = await this.getSessionByReference(reference);
+    if (!session) {
+      return { success: false, message: 'Session not found' };
+    }
+
+    if (session.status !== 'settling') {
+      return { success: false, message: `Invalid status: ${session.status} (expected settling)` };
+    }
+
+    const settlementMode = await this.getSettlementMode(session.api_key_id);
+    if (settlementMode !== 'self') {
+      return { success: false, message: 'This session is not in self-settlement mode' };
+    }
+
+    await this.markSessionSettled(session.id);
+
+    if (settlementReference) {
+      await pool.execute(
+        `UPDATE payment_sessions SET settlement_reference = ?, settlement_provider = 'self', updated_at = NOW() WHERE id = ?`,
+        [settlementReference, session.id]
+      );
+    }
+
+    // Mark the pending self-settlement attempt as success
+    const [attempts] = await pool.execute<(SettlementAttempt & RowDataPacket)[]>(
+      `SELECT * FROM settlement_attempts WHERE session_id = ? AND provider = 'self' ORDER BY created_at DESC LIMIT 1`,
+      [session.id]
+    );
+    if (attempts[0]) {
+      await this.updateSettlementAttempt(attempts[0].id, {
+        status: 'success',
+        reference: settlementReference,
+      });
+    }
+
+    sendPaymentWebhook(session.id, 'payment.settled').catch(() => {});
+    console.log(`[Settlement] Self-settlement confirmed for ${reference}`);
+
+    return { success: true, message: 'Session marked as settled' };
   }
 
   /**
@@ -283,9 +351,19 @@ export class SettlementService {
   // DATABASE HELPERS
   // =============================================================================
 
+  private async getSettlementMode(apiKeyId: number | null | undefined): Promise<'mongoro' | 'self'> {
+    if (!apiKeyId) return 'mongoro';
+    try {
+      const apiKey = await getApiKeyById(apiKeyId);
+      return apiKey?.settlementMode ?? 'mongoro';
+    } catch {
+      return 'mongoro';
+    }
+  }
+
   private async getSession(sessionId: string): Promise<SessionRow | null> {
     const [rows] = await pool.execute<SessionRow[]>(
-      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id
+      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id, api_key_id
        FROM payment_sessions WHERE id = ?`,
       [sessionId]
     );
@@ -294,7 +372,7 @@ export class SettlementService {
 
   private async getSessionByReference(reference: string): Promise<SessionRow | null> {
     const [rows] = await pool.execute<SessionRow[]>(
-      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id
+      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id, api_key_id
        FROM payment_sessions WHERE reference = ?`,
       [reference]
     );
@@ -303,7 +381,7 @@ export class SettlementService {
 
   private async getSessionBySettlementReference(settlementRef: string): Promise<SessionRow | null> {
     const [rows] = await pool.execute<SessionRow[]>(
-      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id
+      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id, api_key_id
        FROM payment_sessions WHERE settlement_reference = ?`,
       [settlementRef]
     );

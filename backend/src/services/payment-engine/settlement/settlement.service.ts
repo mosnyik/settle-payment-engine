@@ -28,6 +28,7 @@ interface ReceiverRow extends RowDataPacket {
   account_number: string;
   account_name: string;
   bank_name?: string;
+  paystack_recipient_code: string | null;
 }
 
 interface ReceiverData {
@@ -35,6 +36,7 @@ interface ReceiverData {
   bankCode: string;
   accountName: string;
   bankName?: string;
+  paystackRecipientCode?: string;
 }
 
 interface SessionRow extends RowDataPacket {
@@ -180,10 +182,19 @@ export class SettlementService {
         receiver.accountName,
         session.fiat_amount,
         narration,
-        session.fiat_currency
+        session.fiat_currency,
+        receiver.paystackRecipientCode
       );
 
       if (response.success && response.data?.reference) {
+        // Cache recipient code on first successful transfer so future transfers skip createRecipient()
+        if (!receiver.paystackRecipientCode && response.data.recipientCode && session.receiver_id) {
+          await pool.execute(
+            `UPDATE receivers SET paystack_recipient_code = ? WHERE id = ?`,
+            [response.data.recipientCode, session.receiver_id]
+          );
+        }
+
         await this.updateSettlementAttempt(attemptId, {
           status: 'pending',
           reference: response.data.reference,
@@ -607,7 +618,7 @@ export class SettlementService {
     if (!receiverId) return null;
 
     const [rows] = await pool.execute<ReceiverRow[]>(
-      `SELECT id, bank_code, account_number, account_name, bank_name
+      `SELECT id, bank_code, account_number, account_name, bank_name, paystack_recipient_code
        FROM receivers WHERE id = ?`,
       [receiverId]
     );
@@ -620,6 +631,7 @@ export class SettlementService {
       bankCode: row.bank_code,
       accountName: row.account_name,
       bankName: row.bank_name,
+      paystackRecipientCode: row.paystack_recipient_code ?? undefined,
     };
   }
 

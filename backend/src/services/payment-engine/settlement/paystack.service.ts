@@ -87,8 +87,10 @@ export class PaystackService {
   }
 
   /**
-   * Initiate a bank transfer. Creates recipient first, then transfers.
+   * Initiate a bank transfer.
+   * Pass `existingRecipientCode` to skip recipient creation if already registered.
    * Amount must be in NGN (converted to kobo internally).
+   * Returns `recipientCode` in data so the caller can persist it for future transfers.
    */
   async transfer(
     accountNumber: string,
@@ -96,16 +98,21 @@ export class PaystackService {
     accountName: string,
     amount: number,
     narration: string,
-    currency: string = 'NGN'
+    currency: string = 'NGN',
+    existingRecipientCode?: string
   ): Promise<PaystackTransferResponse> {
     if (!this.isConfigured()) {
       return { success: false, message: 'Paystack not configured: missing secret key' };
     }
 
-    // Step 1: Create transfer recipient
-    const recipient = await this.createRecipient(accountNumber, bankCode, accountName, currency);
-    if (!recipient.success || !recipient.recipientCode) {
-      return { success: false, message: recipient.message || 'Failed to create recipient' };
+    // Step 1: Use existing recipient code or create a new one
+    let recipientCode = existingRecipientCode;
+    if (!recipientCode) {
+      const recipient = await this.createRecipient(accountNumber, bankCode, accountName, currency);
+      if (!recipient.success || !recipient.recipientCode) {
+        return { success: false, message: recipient.message || 'Failed to create recipient' };
+      }
+      recipientCode = recipient.recipientCode;
     }
 
     // Step 2: Initiate transfer (amount in kobo)
@@ -116,7 +123,7 @@ export class PaystackService {
         body: JSON.stringify({
           source: 'balance',
           amount: Math.round(amount * 100), // kobo
-          recipient: recipient.recipientCode,
+          recipient: recipientCode,
           reason: narration,
         }),
       });
@@ -136,7 +143,7 @@ export class PaystackService {
           transferCode: transfer.transfer_code,
           status: transfer.status,
           amount: transfer.amount / 100, // back to NGN
-          recipientCode: recipient.recipientCode,
+          recipientCode,
         },
       };
     } catch (error) {

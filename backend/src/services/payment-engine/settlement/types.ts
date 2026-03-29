@@ -125,6 +125,7 @@ export interface PaystackWebhookPayload {
     status: string;
     amount: number;
     reason?: string;
+    gateway_response?: string;
     transfer_code?: string;
     recipient?: {
       account_number?: string;

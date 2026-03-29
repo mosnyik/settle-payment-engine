@@ -375,13 +375,49 @@ export class SettlementService {
       await this.markSessionSettled(session.id);
       sendPaymentWebhook(session.id, 'payment.settled').catch(() => {});
       console.log(`[Settlement][Paystack] Completed for ${session.reference}`);
-    } else if (event === 'transfer.failed' || event === 'transfer.reversed') {
+      // Check balance after each successful transfer — catch low balance before the next one fails
+      this.checkPaystackBalance().catch(() => {});
+      return;
+    }
+
+    if (event === 'transfer.failed' || event === 'transfer.reversed') {
+      const isInsufficientBalance = this.paystack.isInsufficientBalanceError(
+        data.reason,
+        data.gateway_response
+      );
+
+      // Mark attempt as failed regardless
       if (attempt) {
         await this.updateSettlementAttempt(attempt.id, {
           status: event === 'transfer.reversed' ? 'reversed' : 'failed',
+          errorMessage: data.reason,
           responsePayload: payload as unknown as Record<string, unknown>,
         });
       }
+
+      if (isInsufficientBalance) {
+        // Keep session in 'settling' — do NOT mark as reversed.
+        // Admin tops up Paystack balance and uses /settle to confirm manually.
+        const sessionData = await this.getSession(session.id);
+        const receiver = await this.getReceiver(session.receiver_id);
+
+        if (sessionData && receiver) {
+          await this.telegram.sendPaystackInsufficientBalanceAlert(
+            {
+              reference: sessionData.reference,
+              fiatAmount: sessionData.fiat_amount,
+              fiatCurrency: sessionData.fiat_currency,
+            },
+            receiver,
+            reference
+          );
+        }
+
+        console.error(`[Settlement][Paystack] Insufficient balance for ${session.reference} — staying in settling, awaiting manual resolution`);
+        return;
+      }
+
+      // Any other failure/reversal — mark as reversed and alert
       await this.updateSessionStatus(session.id, 'settlement_reversed');
       sendPaymentWebhook(session.id, 'payment.settlement_reversed').catch(() => {});
 
@@ -394,11 +430,25 @@ export class SettlementService {
             fiatCurrency: sessionData.fiat_currency,
           },
           reference,
-          `Paystack transfer ${event.replace('transfer.', '')}`
+          `Paystack: ${data.reason || event.replace('transfer.', '')}`
         );
       }
 
-      console.error(`[Settlement][Paystack] ${event} for ${session.reference}`);
+      console.error(`[Settlement][Paystack] ${event} for ${session.reference}: ${data.reason ?? 'unknown reason'}`);
+    }
+  }
+
+  /**
+   * Check Paystack balance and send a low balance alert if below threshold.
+   * Call this after each successful Paystack transfer to stay ahead of the balance.
+   */
+  async checkPaystackBalance(threshold: number = 50000): Promise<void> {
+    const result = await this.paystack.getBalance();
+    if (!result.success || result.balance === undefined) return;
+
+    if (result.balance < threshold) {
+      await this.telegram.sendPaystackLowBalanceAlert(result.balance);
+      console.warn(`[Settlement][Paystack] Low balance alert: NGN ${result.balance.toLocaleString()}`);
     }
   }
 

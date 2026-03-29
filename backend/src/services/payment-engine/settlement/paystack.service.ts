@@ -178,6 +178,42 @@ export class PaystackService {
   }
 
   /**
+   * Get current Paystack balance (in NGN, converted from kobo)
+   */
+  async getBalance(): Promise<{ success: boolean; balance?: number; message?: string }> {
+    if (!this.isConfigured()) {
+      return { success: false, message: 'Paystack not configured' };
+    }
+
+    try {
+      const res = await fetch(`${this.baseUrl}/balance`, {
+        headers: this.headers,
+      });
+
+      const data = await res.json() as PaystackApiResponse;
+
+      if (!res.ok || !data.status) {
+        return { success: false, message: data.message || `HTTP ${res.status}` };
+      }
+
+      const balances = data.data as unknown as Array<{ currency: string; balance: number }>;
+      const ngn = balances.find(b => b.currency === 'NGN');
+      return { success: true, balance: ngn ? ngn.balance / 100 : 0 };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, message: `Network error: ${message}` };
+    }
+  }
+
+  /**
+   * Check if a failure reason indicates insufficient balance
+   */
+  isInsufficientBalanceError(reason?: string, gatewayResponse?: string): boolean {
+    const text = `${reason ?? ''} ${gatewayResponse ?? ''}`.toLowerCase();
+    return text.includes('insufficient') || text.includes('not enough') || text.includes('low balance');
+  }
+
+  /**
    * Verify a Paystack webhook signature
    */
   verifyWebhookSignature(rawBody: string, signature: string): boolean {

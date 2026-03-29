@@ -83,6 +83,54 @@ export class TelegramService {
   }
 
   /**
+   * Send alert when Paystack transfer fails due to insufficient balance.
+   * Session stays in 'settling' — admin must top up and manually confirm.
+   */
+  async sendPaystackInsufficientBalanceAlert(
+    session: SessionAlertData,
+    receiver: { accountNumber: string; bankCode: string; accountName: string; bankName?: string },
+    transferReference: string
+  ): Promise<boolean> {
+    const bankDisplay = receiver.bankName || receiver.bankCode;
+    const amount = session.fiatAmount.toLocaleString();
+
+    const message = `
+<b>⚠️ Paystack Insufficient Balance</b>
+
+Settlement could not complete — your Paystack balance is too low.
+
+<b>Session:</b> ${session.reference}
+<b>Amount:</b> ${session.fiatCurrency} ${amount}
+<b>Account:</b> ${receiver.accountNumber}
+<b>Bank:</b> ${bankDisplay}
+<b>Name:</b> ${receiver.accountName}
+<b>Transfer Ref:</b> ${transferReference}
+
+<b>Action:</b> Top up Paystack balance, then either retry the transfer or settle manually:
+<code>/settle ${session.reference}</code>
+    `.trim();
+
+    return this.sendMessage(message);
+  }
+
+  /**
+   * Send proactive low balance warning (before transfers fail).
+   */
+  async sendPaystackLowBalanceAlert(balance: number, currency: string = 'NGN'): Promise<boolean> {
+    const message = `
+<b>⚠️ Paystack Low Balance Warning</b>
+
+Your Paystack balance is running low.
+
+<b>Current Balance:</b> ${currency} ${balance.toLocaleString()}
+
+Top up your Paystack account to avoid failed settlements.
+    `.trim();
+
+    return this.sendMessage(message);
+  }
+
+  /**
    * Send alert for settlement reversal
    */
   async sendSettlementReversalAlert(

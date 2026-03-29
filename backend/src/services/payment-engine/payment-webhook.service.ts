@@ -46,10 +46,12 @@ interface SessionWebhookRow extends RowDataPacket {
 /**
  * Send a webhook for a payment session event.
  * Silently no-ops if the API key has no webhook configured.
+ * Pass extraData to include additional fields in the payload (e.g. settlementToken).
  */
 export async function sendPaymentWebhook(
   sessionId: string,
-  event: PaymentWebhookEvent
+  event: PaymentWebhookEvent,
+  extraData?: Record<string, unknown>
 ): Promise<void> {
   try {
     const [rows] = await pool.query<SessionWebhookRow[]>(
@@ -87,6 +89,7 @@ export async function sendPaymentWebhook(
         receivedAmount: row.received_amount != null ? Number(row.received_amount) : null,
         metadata,
       },
+      ...(extraData ?? {}),
     };
 
     const payloadString = JSON.stringify(payload);

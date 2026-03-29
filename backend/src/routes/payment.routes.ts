@@ -386,9 +386,16 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { reference } = req.params;
-      const { settlementReference } = req.body as { settlementReference?: string };
+      const { settlementToken, settlementReference } = req.body as {
+        settlementToken?: string;
+        settlementReference?: string;
+      };
 
-      const result = await settlementService.confirmSelfSettlement(reference, settlementReference);
+      if (!settlementToken) {
+        return res.status(400).json({ success: false, error: 'settlementToken is required' });
+      }
+
+      const result = await settlementService.confirmSelfSettlement(reference, settlementToken, settlementReference);
 
       if (!result.success) {
         return res.status(400).json({ success: false, error: result.message });

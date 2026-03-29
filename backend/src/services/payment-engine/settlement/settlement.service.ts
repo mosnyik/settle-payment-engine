@@ -5,6 +5,7 @@
  * Uses Mongoro for bank transfers with Telegram fallback for failures.
  */
 
+import crypto from 'crypto';
 import config from '../../../config';
 import { pool } from '../../../lib/mysql';
 import { MongoroService, mongoroService } from './mongoro.service';
@@ -44,6 +45,8 @@ interface SessionRow extends RowDataPacket {
   fiat_currency: string;
   receiver_id: number | null;
   api_key_id: number | null;
+  settlement_token: string | null;
+  settlement_token_expires_at: Date | null;
 }
 
 export class SettlementService {
@@ -110,10 +113,20 @@ export class SettlementService {
 
     // 4. Update status to settling
     await this.updateSessionStatus(sessionId, 'settling');
-    sendPaymentWebhook(sessionId, 'payment.settling').catch(() => {});
 
     if (settlementMode === 'self') {
-      // Self-settlement: notify the integrator via webhook and wait for them to call /settle
+      // Self-settlement: generate a one-time token, store it, fire webhook with token included.
+      // The integrator must echo this token back on POST /payments/:ref/settle.
+      const settlementToken = crypto.randomBytes(32).toString('hex');
+      const tokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+      await pool.execute(
+        `UPDATE payment_sessions
+         SET settlement_token = ?, settlement_token_expires_at = ?, updated_at = NOW()
+         WHERE id = ?`,
+        [settlementToken, tokenExpiresAt, sessionId]
+      );
+
       await this.createSettlementAttempt({
         sessionId,
         provider: 'self',
@@ -124,7 +137,11 @@ export class SettlementService {
         accountName: receiver.accountName,
       });
 
-      console.log(`[Settlement] Self-settlement mode for ${session.reference} — awaiting integrator callback`);
+      // Include token in the payment.settling webhook payload — only the integrator's
+      // server receives this, so they are the only ones who can complete the settlement.
+      sendPaymentWebhook(sessionId, 'payment.settling', { settlementToken }).catch(() => {});
+
+      console.log(`[Settlement] Self-settlement mode for ${session.reference} — token issued, awaiting integrator callback`);
       return;
     }
 
@@ -219,9 +236,11 @@ export class SettlementService {
   /**
    * Confirm settlement for self-settlement mode.
    * Called by the integrator after they have sent the fiat to the receiver.
+   * Requires the settlementToken that was included in the payment.settling webhook.
    */
   async confirmSelfSettlement(
     reference: string,
+    settlementToken: string,
     settlementReference?: string
   ): Promise<{ success: boolean; message: string }> {
     const session = await this.getSessionByReference(reference);
@@ -237,6 +256,27 @@ export class SettlementService {
     if (settlementMode !== 'self') {
       return { success: false, message: 'This session is not in self-settlement mode' };
     }
+
+    // Validate the one-time settlement token
+    if (!session.settlement_token) {
+      return { success: false, message: 'No settlement token found for this session' };
+    }
+    if (!crypto.timingSafeEqual(
+      Buffer.from(session.settlement_token),
+      Buffer.from(settlementToken)
+    )) {
+      console.warn(`[Settlement] Invalid settlement token attempt for ${reference}`);
+      return { success: false, message: 'Invalid settlement token' };
+    }
+    if (session.settlement_token_expires_at && new Date() > session.settlement_token_expires_at) {
+      return { success: false, message: 'Settlement token has expired' };
+    }
+
+    // Consume the token — one-time use only
+    await pool.execute(
+      `UPDATE payment_sessions SET settlement_token = NULL, settlement_token_expires_at = NULL, updated_at = NOW() WHERE id = ?`,
+      [session.id]
+    );
 
     await this.markSessionSettled(session.id);
 
@@ -480,7 +520,8 @@ export class SettlementService {
 
   private async getSessionByReference(reference: string): Promise<SessionRow | null> {
     const [rows] = await pool.execute<SessionRow[]>(
-      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id, api_key_id
+      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id, api_key_id,
+              settlement_token, settlement_token_expires_at
        FROM payment_sessions WHERE reference = ?`,
       [reference]
     );

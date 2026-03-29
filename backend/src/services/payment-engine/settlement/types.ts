@@ -104,6 +104,7 @@ export interface MongoroConfig {
 export interface PaystackConfig {
   secretKey: string;
   webhookSecret: string;
+  lowBalanceThreshold: number;
 }
 
 export interface PaystackTransferResponse {

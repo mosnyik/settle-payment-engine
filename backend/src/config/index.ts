@@ -111,6 +111,7 @@ export const config = {
     paystack: {
       secretKey: process.env.PAYSTACK_SECRET_KEY || "",
       webhookSecret: process.env.PAYSTACK_WEBHOOK_SECRET || "",
+      lowBalanceThreshold: parseFloat(process.env.PAYSTACK_LOW_BALANCE_THRESHOLD || "100000"),
     },
     telegram: {
       enabled: process.env.TELEGRAM_ALERTS_ENABLED === "true",

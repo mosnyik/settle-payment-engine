@@ -148,7 +148,22 @@ export class SettlementService {
     const narration = `2Settle ${session.reference}`;
 
     if (settlementMode === 'paystack') {
-      // 5a. Paystack mode
+      // 5a. Pre-flight balance check — don't attempt a transfer we know will fail
+      const balanceResult = await this.paystack.getBalance();
+      if (balanceResult.success && balanceResult.balance !== undefined) {
+        if (balanceResult.balance < session.fiat_amount) {
+          // Balance won't cover this payment — alert and leave in settling for manual resolution
+          await this.telegram.sendPaystackInsufficientBalanceAlert(
+            { reference: session.reference, fiatAmount: session.fiat_amount, fiatCurrency: session.fiat_currency },
+            receiver,
+            'pre-transfer-check'
+          );
+          console.error(`[Settlement][Paystack] Insufficient balance (${balanceResult.balance}) for ${session.reference} (${session.fiat_amount}) — skipping transfer`);
+          return;
+        }
+      }
+
+      // 5b. Paystack mode — initiate transfer
       const attemptId = await this.createSettlementAttempt({
         sessionId,
         provider: 'paystack',
@@ -439,16 +454,17 @@ export class SettlementService {
   }
 
   /**
-   * Check Paystack balance and send a low balance alert if below threshold.
-   * Call this after each successful Paystack transfer to stay ahead of the balance.
+   * Check Paystack balance and send a low balance alert if below the configured threshold.
+   * Called after each successful transfer so the next one doesn't silently fail.
    */
-  async checkPaystackBalance(threshold: number = 50000): Promise<void> {
+  async checkPaystackBalance(): Promise<void> {
+    const threshold = this.config.paystack.lowBalanceThreshold;
     const result = await this.paystack.getBalance();
     if (!result.success || result.balance === undefined) return;
 
     if (result.balance < threshold) {
       await this.telegram.sendPaystackLowBalanceAlert(result.balance);
-      console.warn(`[Settlement][Paystack] Low balance alert: NGN ${result.balance.toLocaleString()}`);
+      console.warn(`[Settlement][Paystack] Low balance alert: NGN ${result.balance.toLocaleString()} (threshold: NGN ${threshold.toLocaleString()})`);
     }
   }
 

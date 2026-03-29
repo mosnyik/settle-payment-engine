@@ -36,21 +36,21 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     <div className="flex min-h-screen">
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0">
-        <header className="h-12 flex items-center justify-between px-6 border-b bg-white shrink-0">
-          <span className="text-sm text-slate-500">
+        <header className="h-12 flex items-center justify-between px-6 border-b border-slate-100 bg-white shrink-0">
+          <span className="text-sm font-medium text-slate-500">
             {session?.name ?? session?.merchantId ?? '2Settle Dashboard'}
           </span>
           <Button
             variant="ghost"
             size="sm"
             onClick={handleLogout}
-            className="gap-1.5 text-slate-600 hover:text-slate-900"
+            className="gap-1.5 text-slate-500 hover:text-[#2D6BE4]"
           >
             <LogOut className="size-4" />
             Logout
           </Button>
         </header>
-        <main className="flex-1 bg-slate-50 p-6 overflow-auto">
+        <main className="flex-1 bg-[#f0f4ff]/40 p-6 overflow-auto">
           {children}
         </main>
       </div>

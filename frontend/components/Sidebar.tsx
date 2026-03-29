@@ -9,6 +9,7 @@ import {
   Banknote,
   ScrollText,
 } from 'lucide-react';
+import Logo from '@/components/Logo';
 
 const navItems = [
   { href: '/payments', label: 'Payments', icon: CreditCard },
@@ -21,9 +22,9 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="w-56 shrink-0 flex flex-col bg-slate-900 text-slate-100 min-h-screen">
-      <div className="px-5 py-5 border-b border-slate-700">
-        <span className="font-semibold text-base tracking-tight text-white">2Settle Admin</span>
+    <aside className="w-56 shrink-0 flex flex-col min-h-screen" style={{ background: '#191F32' }}>
+      <div className="px-5 py-4 border-b border-white/10 flex items-center">
+        <Logo />
       </div>
       <nav className="flex flex-col gap-1 p-3 flex-1">
         {navItems.map(({ href, label, icon: Icon }) => {
@@ -35,8 +36,8 @@ export function Sidebar() {
               className={cn(
                 'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                 active
-                  ? 'bg-slate-700 text-white'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
+                  ? 'bg-[#2D6BE4] text-white'
+                  : 'text-white/50 hover:bg-white/10 hover:text-white'
               )}
             >
               <Icon className="size-4 shrink-0" />

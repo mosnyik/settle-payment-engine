@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   AlertTriangle,
 } from 'lucide-react'
+import Logo from '@/components/Logo'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -86,6 +87,17 @@ function formatFiat(amount: number, currency: string): string {
   }
 }
 
+function buildCryptoUri(address: string, amount: number | null, network: string | null): string {
+  if (amount == null) return address
+  const amt = parseFloat(amount.toFixed(8)).toString()
+  const net = network ?? ''
+  if (net === 'bitcoin') return `bitcoin:${address}?amount=${amt}`
+  if (net === 'trc20' || net === 'tron') return `tron:${address}?amount=${amt}`
+  if (net === 'erc20' || net === 'ethereum') return `ethereum:${address}?value=${amt}`
+  if (net === 'bep20' || net === 'bsc') return `ethereum:${address}?value=${amt}`
+  return `${address}?amount=${amt}`
+}
+
 function formatCountdown(seconds: number): string {
   if (seconds <= 0) return '00:00'
   const m = Math.floor(seconds / 60)
@@ -96,34 +108,6 @@ function formatCountdown(seconds: number): string {
 function secondsUntil(isoDate: string | null): number {
   if (!isoDate) return 0
   return Math.max(0, Math.floor((new Date(isoDate).getTime() - Date.now()) / 1000))
-}
-
-// ---------------------------------------------------------------------------
-// Logo
-// ---------------------------------------------------------------------------
-
-function TwoSettleLogo() {
-  return (
-    <div className="flex items-center gap-2">
-      {/* Hand + coin icon */}
-      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-        <rect width="32" height="32" rx="8" fill="#2D6BE4" />
-        <path
-          d="M8 20c0-1.1.9-2 2-2h4v-4a2 2 0 1 1 4 0v6h2a2 2 0 0 1 2 2H8v-2Z"
-          fill="white"
-          opacity="0.9"
-        />
-        <circle cx="20" cy="12" r="4" fill="white" opacity="0.95" />
-        <text x="20" y="15.5" textAnchor="middle" fontSize="6" fontWeight="700" fill="#2D6BE4">$</text>
-      </svg>
-      <span
-        style={{ fontFamily: 'var(--font-geist-sans), Inter, sans-serif' }}
-        className="text-xl font-bold tracking-tight text-slate-800"
-      >
-        2settle
-      </span>
-    </div>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -235,9 +219,14 @@ function PendingState({ payment, countdown }: { payment: Payment; countdown: num
       {/* Amount */}
       <div className="text-center space-y-1">
         <p className="text-sm text-slate-500">Send exactly</p>
-        <p className="text-3xl font-bold text-slate-900 tracking-tight">
-          {formatCrypto(payment.cryptoAmount, payment.crypto)}
-        </p>
+        <div className="flex items-center justify-center gap-2">
+          <p className="text-3xl font-bold text-slate-900 tracking-tight">
+            {formatCrypto(payment.cryptoAmount, payment.crypto)}
+          </p>
+          {payment.cryptoAmount != null && (
+            <CopyButton text={parseFloat(payment.cryptoAmount.toFixed(8)).toString()} />
+          )}
+        </div>
         <p className="text-sm text-slate-400">
           ≈ {formatFiat(payment.fiatAmount, payment.fiatCurrency)}
         </p>
@@ -264,7 +253,7 @@ function PendingState({ payment, countdown }: { payment: Payment; countdown: num
         </div>
       )}
 
-      {/* Address */}
+      {/* Address + Amount */}
       {payment.depositAddress && (
         <div className="space-y-2">
           <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
@@ -272,8 +261,7 @@ function PendingState({ payment, countdown }: { payment: Payment; countdown: num
           </p>
           <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
             <p
-              className="flex-1 text-xs text-slate-700 break-all leading-relaxed"
-              style={{ fontFamily: 'var(--font-geist-mono), monospace' }}
+              className="flex-1 text-xs text-slate-700 break-all leading-relaxed font-mono"
             >
               {payment.depositAddress}
             </p>
@@ -565,7 +553,7 @@ export default function PaymentPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="flex justify-center mb-6">
-          <TwoSettleLogo />
+          <Logo />
         </div>
 
         <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-100 overflow-hidden">

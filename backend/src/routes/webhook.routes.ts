@@ -10,6 +10,8 @@ import { Router, Request, Response } from 'express';
 import { settlementService } from '../services/payment-engine/settlement/settlement.service';
 import { paystackService } from '../services/payment-engine/settlement/paystack.service';
 import { MongoroWebhookPayload, PaystackWebhookPayload } from '../services/payment-engine/settlement/types';
+import { getClientIp, isIpAllowed } from '../security/middleware/ipWhitelist';
+import config from '../config';
 
 const router = Router();
 
@@ -17,6 +19,17 @@ const router = Router();
 // POST /v1/webhooks/mongoro
 // =============================================================================
 router.post('/mongoro', async (req: Request, res: Response) => {
+  // IP allowlist — only accept calls from known Mongoro server IPs.
+  // If MONGORO_WEBHOOK_IPS is not configured, skip the check (open during initial setup).
+  const allowedIps = config.settlement.mongoro.webhookIps;
+  if (allowedIps.length > 0) {
+    const clientIp = getClientIp(req);
+    if (!isIpAllowed(clientIp, allowedIps)) {
+      console.warn(`[Webhook] Mongoro request rejected from unauthorised IP: ${clientIp}`);
+      return res.status(401).json({ success: false });
+    }
+  }
+
   try {
     const payload = req.body as MongoroWebhookPayload;
     await settlementService.handleWebhook(payload);

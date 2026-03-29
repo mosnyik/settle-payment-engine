@@ -107,6 +107,9 @@ export const config = {
       token: process.env.MONGORO_TOKEN || "",
       transferPin: process.env.MONGORO_TRANSFERPIN || "",
       callbackUrl: process.env.MONGORO_CALLBACK_URL || "",
+      webhookIps: process.env.MONGORO_WEBHOOK_IPS
+        ? process.env.MONGORO_WEBHOOK_IPS.split(",").map((ip) => ip.trim())
+        : [],
     },
     paystack: {
       secretKey: process.env.PAYSTACK_SECRET_KEY || "",

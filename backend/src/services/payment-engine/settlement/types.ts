@@ -99,6 +99,7 @@ export interface MongoroConfig {
   token: string;
   transferPin: string;
   callbackUrl: string;
+  webhookIps: string[];
 }
 
 export interface PaystackConfig {

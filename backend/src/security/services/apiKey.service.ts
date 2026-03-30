@@ -31,7 +31,7 @@ interface ApiKeyRow extends RowDataPacket {
   webhook_url: string | null;
   webhook_secret: string | null;
   sweep_address: string | null;
-  settlement_mode: 'mongoro' | 'self';
+  settlement_mode: 'mongoro' | 'paystack' | 'self';
   // Per-key merchant wallets
   funding_wallet_index: number | null;
   funding_wallet_bitcoin: string | null;
@@ -297,7 +297,7 @@ export async function updateApiKey(
     ipWhitelist?: string[] | null;
     webhookUrl?: string | null;
     sweepAddress?: string | null;
-    settlementMode?: 'mongoro' | 'self';
+    settlementMode?: 'mongoro' | 'paystack' | 'self';
   }
 ): Promise<ApiKey | null> {
   const setClauses: string[] = [];

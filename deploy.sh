@@ -27,7 +27,7 @@ case "$1" in
     fi
 
     # Create nginx directories
-    mkdir -p nginx/ssl nginx/certbot
+    mkdir -p backend/nginx/ssl backend/nginx/certbot
 
     # Build and start
     docker compose -f $COMPOSE_FILE up -d --build
@@ -64,7 +64,7 @@ case "$1" in
       -d $DOMAIN
 
     # Update nginx config
-    sed -i "s/yourdomain.com/$DOMAIN/g" nginx/nginx.conf
+    sed -i "s/yourdomain.com/$DOMAIN/g" backend/nginx/nginx.conf
 
     # Reload nginx
     docker compose -f $COMPOSE_FILE -f $COMPOSE_PROD exec nginx nginx -s reload

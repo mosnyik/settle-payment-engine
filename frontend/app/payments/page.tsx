@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { DashboardLayout } from '@/components/DashboardLayout';
-import { getPayments, type Payment } from '@/lib/api';
+import { getPayments, getPaymentStats, type Payment, type PaymentStats } from '@/lib/api';
 import { cn, formatCurrency, formatDate, STATUS_COLORS } from '@/lib/utils';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -14,9 +14,25 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Loader2, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 
 const LIMIT = 50;
+
+const STATE_CARDS: Array<{
+  label: string;
+  statuses: string[];
+  icon: React.ElementType;
+  color: string;
+  bg: string;
+  border: string;
+}> = [
+  { label: 'Pending',    statuses: ['pending'],    icon: Clock,        color: 'text-amber-600',  bg: 'bg-amber-50',   border: 'border-amber-200' },
+  { label: 'Confirming', statuses: ['confirming'], icon: Loader2,      color: 'text-blue-600',   bg: 'bg-blue-50',    border: 'border-blue-200' },
+  { label: 'Confirmed',  statuses: ['confirmed'],  icon: CheckCircle2, color: 'text-violet-600', bg: 'bg-violet-50',  border: 'border-violet-200' },
+  { label: 'Settling',   statuses: ['settling'],   icon: RefreshCw,    color: 'text-indigo-600', bg: 'bg-indigo-50',  border: 'border-indigo-200' },
+  { label: 'Settled',    statuses: ['settled'],    icon: CheckCircle2, color: 'text-emerald-600',bg: 'bg-emerald-50', border: 'border-emerald-200' },
+  { label: 'Failed / Expired', statuses: ['failed', 'expired', 'settlement_reversed'], icon: XCircle, color: 'text-red-500', bg: 'bg-red-50', border: 'border-red-200' },
+];
 
 const ALL_STATUSES = [
   'created', 'pending', 'confirming', 'confirmed',
@@ -31,6 +47,7 @@ export default function PaymentsPage() {
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<PaymentStats>({});
 
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -63,6 +80,10 @@ export default function PaymentsPage() {
     fetchPayments();
   }, [fetchPayments]);
 
+  useEffect(() => {
+    getPaymentStats().then((res) => setStats(res.data.stats)).catch(() => {});
+  }, []);
+
   // Reset offset when filters change
   useEffect(() => {
     setOffset(0);
@@ -82,6 +103,39 @@ export default function PaymentsPage() {
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-semibold text-slate-900">Payments</h1>
           <span className="text-sm text-slate-500">{total.toLocaleString()} total</span>
+        </div>
+
+        {/* State distribution cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {STATE_CARDS.map((card) => {
+            const count = card.statuses.reduce((sum, s) => sum + (stats[s] ?? 0), 0);
+            const isActive = card.statuses.some((s) => s === statusFilter);
+            const Icon = card.icon;
+            return (
+              <button
+                key={card.label}
+                onClick={() => {
+                  if (isActive) {
+                    setStatusFilter('all');
+                  } else {
+                    setStatusFilter(card.statuses[0]);
+                  }
+                }}
+                className={cn(
+                  'flex flex-col gap-1.5 p-3 rounded-xl border text-left transition-all duration-150',
+                  card.bg, card.border,
+                  isActive ? 'ring-2 ring-offset-1 ring-current' : 'hover:opacity-80',
+                  card.color
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <Icon className="w-4 h-4" />
+                  <span className="text-lg font-bold tabular-nums">{count}</span>
+                </div>
+                <span className="text-xs font-medium leading-tight">{card.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Filters */}

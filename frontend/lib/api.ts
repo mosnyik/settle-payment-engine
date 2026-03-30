@@ -137,6 +137,12 @@ export interface PaymentDetailResponse {
   data: { payment: Payment & Record<string, unknown>; settlementAttempts: unknown[] };
 }
 
+export type PaymentStats = Record<string, number>;
+
+export function getPaymentStats() {
+  return request<{ status: boolean; data: { stats: PaymentStats } }>('/me/payments/stats');
+}
+
 export function getPayments(params: Record<string, string> = {}) {
   const qs = new URLSearchParams(params).toString();
   return request<PaymentsResponse>(`/me/payments${qs ? `?${qs}` : ''}`);

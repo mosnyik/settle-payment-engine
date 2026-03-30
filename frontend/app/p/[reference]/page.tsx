@@ -114,6 +114,90 @@ function secondsUntil(isoDate: string | null): number {
 // Sub-components
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Payment Stepper
+// ---------------------------------------------------------------------------
+
+const STEPS = [
+  { key: 'pending',    label: 'Awaiting Payment' },
+  { key: 'confirming', label: 'Confirming' },
+  { key: 'confirmed',  label: 'Confirmed' },
+  { key: 'settling',   label: 'Settling' },
+  { key: 'settled',    label: 'Complete' },
+]
+
+const STATUS_TO_STEP: Record<string, number> = {
+  pending: 0,
+  confirming: 1,
+  confirmed: 2,
+  settling: 3,
+  settled: 4,
+}
+
+function PaymentStepper({
+  status,
+  confirmations,
+  network,
+}: {
+  status: string
+  confirmations?: number | null
+  network?: string | null
+}) {
+  if (!STATUS_TO_STEP.hasOwnProperty(status)) return null
+
+  const currentStep = STATUS_TO_STEP[status]
+  const target = CONFIRMATION_TARGETS[network ?? ''] ?? 12
+  const current = Math.min(confirmations ?? 0, target)
+
+  return (
+    <div className="px-6 py-4 border-b border-slate-100">
+      <div className="flex items-center justify-between relative">
+        {/* Connecting line background */}
+        <div className="absolute top-3.5 left-0 right-0 h-px bg-slate-200 z-0" />
+        {/* Connecting line fill */}
+        <div
+          className="absolute top-3.5 left-0 h-px bg-[#2D6BE4] z-0 transition-all duration-700"
+          style={{ width: `${(currentStep / (STEPS.length - 1)) * 100}%` }}
+        />
+
+        {STEPS.map((step, i) => {
+          const done = i < currentStep
+          const active = i === currentStep
+          const isConfirmingStep = step.key === 'confirming'
+
+          return (
+            <div key={step.key} className="flex flex-col items-center gap-1.5 z-10">
+              <div
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all duration-300 ${
+                  done
+                    ? 'bg-[#2D6BE4] border-[#2D6BE4] text-white'
+                    : active
+                    ? 'bg-white border-[#2D6BE4] text-[#2D6BE4]'
+                    : 'bg-white border-slate-200 text-slate-300'
+                }`}
+              >
+                {done ? <Check className="w-3.5 h-3.5" /> : <span>{i + 1}</span>}
+              </div>
+              <span
+                className={`text-[10px] font-medium text-center leading-tight w-14 ${
+                  done || active ? 'text-slate-700' : 'text-slate-300'
+                }`}
+              >
+                {step.label}
+                {isConfirmingStep && active && (
+                  <span className="block text-[#2D6BE4] font-bold tabular-nums">
+                    {current}/{target}
+                  </span>
+                )}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; class: string }> = {
     pending:    { label: 'Awaiting Payment', class: 'bg-amber-50 text-amber-700 border-amber-200' },
@@ -573,6 +657,15 @@ export default function PaymentPage() {
             </div>
             {payment && <StatusBadge status={payment.status} />}
           </div>
+
+          {/* Stepper */}
+          {payment && (
+            <PaymentStepper
+              status={payment.status}
+              confirmations={payment.confirmations}
+              network={payment.network}
+            />
+          )}
 
           {/* Body */}
           <div className="px-6 py-6">

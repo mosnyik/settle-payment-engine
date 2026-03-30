@@ -90,6 +90,32 @@ router.get('/payments', async (req: Request, res: Response, next: NextFunction) 
 });
 
 /**
+ * GET /v1/me/payments/stats
+ * Count of payments per status for the authenticated API key.
+ */
+router.get('/payments/stats', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const apiKeyId = req.apiKey!.id;
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT status, COUNT(*) AS count
+       FROM payment_sessions
+       WHERE api_key_id = ?
+       GROUP BY status`,
+      [apiKeyId]
+    );
+
+    const stats: Record<string, number> = {};
+    for (const row of rows as Array<{ status: string; count: number }>) {
+      stats[row.status] = Number(row.count);
+    }
+
+    return res.json({ status: true, data: { stats } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /v1/me/payments/:reference
  * Single payment — only if it belongs to the authenticated API key.
  */

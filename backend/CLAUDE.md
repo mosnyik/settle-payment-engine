@@ -1,6 +1,6 @@
 # Payment Engine
 
-A standalone Express API for crypto-to-fiat payment processing. Supports transfers, gifts, payment requests, and merchant payments with HD wallet derivation and automatic fund sweeping.
+A standalone Express API for crypto-to-fiat payment processing. Supports transfers, gifts, payment requests, and merchant payments with HD wallet derivation, automatic fund sweeping, and multi-provider fiat settlement (Mongoro, Paystack, self-settlement).
 
 ## Table of Contents
 
@@ -8,7 +8,9 @@ A standalone Express API for crypto-to-fiat payment processing. Supports transfe
 - [Configuration](#configuration)
 - [API Reference](#api-reference)
 - [Authentication](#authentication)
+- [Settlement Modes](#settlement-modes)
 - [Payment Flows](#payment-flows)
+- [Wallet-as-a-Service (WaaS)](#wallet-as-a-service-waas)
 - [HD Wallet Setup](#hd-wallet-setup)
 - [Database Setup](#database-setup)
 - [Testing with Postman](#testing-with-postman)
@@ -38,7 +40,7 @@ pnpm build
 pnpm test
 ```
 
-Server runs on `http://localhost:3500` (configurable via PORT).
+Server runs on `http://localhost:3500` (configurable via `PORT`).
 
 ---
 
@@ -51,6 +53,11 @@ Server runs on `http://localhost:3500` (configurable via PORT).
 # SERVER
 # =============================================================================
 PORT=3500
+NODE_ENV=development
+
+# Comma-separated allowed CORS origins (frontend URLs)
+# Defaults to http://localhost:3000 if not set
+CORS_ORIGIN=http://localhost:3000,https://your-admin.vercel.app
 
 # =============================================================================
 # DATABASE
@@ -64,6 +71,7 @@ DB_NAME=2settle
 # =============================================================================
 # ADMIN
 # =============================================================================
+# Generate with: openssl rand -hex 32
 ADMIN_SECRET=your-secure-admin-secret-here
 
 # =============================================================================
@@ -88,17 +96,16 @@ HOT_WALLET_TRON=T...
 # SWEEPER (Requires HD Wallet)
 # =============================================================================
 SWEEPER_ENABLED=true
-SWEEPER_BITCOIN_RPC=https://blockstream.info/api
-SWEEPER_ETHEREUM_RPC=https://mainnet.infura.io/v3/your_key
-SWEEPER_BSC_RPC=https://bsc-dataseed.binance.org
-SWEEPER_TRON_RPC=https://api.trongrid.io
+ETHEREUM_RPC_URL=https://eth.llamarpc.com
+BSC_RPC_URL=https://bsc-dataseed.binance.org
 
-# Minimum amounts to sweep
-SWEEPER_THRESHOLD_BTC=0.0001
-SWEEPER_THRESHOLD_ETH=0.001
-SWEEPER_THRESHOLD_BNB=0.001
-SWEEPER_THRESHOLD_TRX=10
-SWEEPER_THRESHOLD_USDT=1
+# Minimum amounts to sweep (saves gas on small deposits)
+SWEEP_MIN_BTC=0.0001
+SWEEP_MIN_ETH=0.001
+SWEEP_MIN_BNB=0.01
+SWEEP_MIN_TRX=10
+SWEEP_MIN_USDT=1
+SWEEP_MIN_USDC=1
 
 # =============================================================================
 # DEPOSIT WATCHER
@@ -108,16 +115,34 @@ ETHERSCAN_API_KEY=your_key
 BSCSCAN_API_KEY=your_key
 TRONGRID_API_KEY=your_key
 
+# Polling intervals (ms)
+WATCHER_BITCOIN_POLL_MS=60000
+WATCHER_ETHEREUM_POLL_MS=15000
+WATCHER_BSC_POLL_MS=5000
+WATCHER_TRON_POLL_MS=5000
+
 # =============================================================================
 # SETTLEMENT (Fiat Payout)
 # =============================================================================
 SETTLEMENT_ENABLED=true
+
+# --- Mongoro ---
 MONGORO_API_URL=https://api-biz-dev.mongoro.com/api/v1/openapi
 MONGORO_TOKEN=your_token
 MONGORO_TRANSFERPIN=your_pin
 MONGORO_CALLBACK_URL=https://yourapp.com/v1/webhooks/mongoro
+# Comma-separated IPs/CIDRs allowed to POST /v1/webhooks/mongoro
+# Leave empty to skip IP check during initial setup
+MONGORO_WEBHOOK_IPS=
 
-# Telegram Alerts
+# --- Paystack ---
+# Get from: https://dashboard.paystack.com/#/settings/developers
+PAYSTACK_SECRET_KEY=sk_live_xxxx
+PAYSTACK_WEBHOOK_SECRET=your_paystack_webhook_secret
+# Minimum NGN balance to trigger low-balance alert (default: ₦100,000)
+PAYSTACK_LOW_BALANCE_THRESHOLD=100000
+
+# --- Telegram Alerts (settlement failure fallback) ---
 TELEGRAM_ALERTS_ENABLED=true
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
@@ -128,6 +153,7 @@ TELEGRAM_CHAT_ID=your_chat_id
 RATE_LIMIT_ENABLED=true
 IP_WHITELIST_ENABLED=true
 AUDIT_LOG_ENABLED=true
+# Max age for request timestamps (ms) — prevents replay attacks
 HMAC_TIMESTAMP_TOLERANCE_MS=300000
 ```
 
@@ -141,48 +167,89 @@ HMAC_TIMESTAMP_TOLERANCE_MS=300000
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/v1/health` | Health check |
-| GET | `/v1/rate/current` | Current exchange rates |
-| GET | `/v1/banks` | List supported banks |
-| GET | `/v1/crypto/prices` | Crypto prices |
+| GET | `/v1/rate` | Current NGN exchange rate |
+| GET | `/v1/rate/merchant` | Merchant rate |
+| GET | `/v1/rate/profit` | Profit rate |
+| GET | `/v1/rate/all` | All rates (current, merchant, profit) |
+| GET | `/v1/banks/list?name=` | Search banks by name |
+| POST | `/v1/banks/resolve` | Resolve bank account (NUBAN) |
+| GET | `/v1/crypto/price?ticker=` | Crypto price by ticker |
+| POST | `/v1/auth/login` | Validate API key credentials |
+
+### Payment Endpoints (HMAC Auth Required)
+
+| Method | Endpoint | Permission | Description |
+|--------|----------|------------|-------------|
+| POST | `/v1/payments` | `payment:create` | Create payment (transfer, gift, request, merchant) |
+| GET | `/v1/payments/:reference` | Public | Get payment status |
+| POST | `/v1/payments/gifts/:reference/claim` | Public | Claim a gift (provide receiver bank details) |
+| POST | `/v1/payments/requests/:reference/fulfill` | Public | Fulfill a request (provide payer + crypto) |
+| POST | `/v1/payments/:reference/settle` | `payment:create` | Confirm self-settlement (requires `settlementToken`) |
+
+### Me Endpoints (HMAC Auth — own key only)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/me` | Get authenticated API key details |
+| GET | `/v1/me/payments` | List own payments (filterable: `status`, `type`, `from`, `to`, `search`) |
+| GET | `/v1/me/payments/stats` | Count of payments per status |
+| GET | `/v1/me/payments/:reference` | Get single payment with settlement attempts |
+| GET | `/v1/me/audit-logs` | Get own audit logs (filterable: `from`, `to`, `action`) |
+
+### Wallet-as-a-Service Endpoints (HMAC Auth Required)
+
+| Method | Endpoint | Permission | Description |
+|--------|----------|------------|-------------|
+| POST | `/v1/wallets` | `wallet:create` | Provision new HD wallet address for deposit monitoring |
+| GET | `/v1/wallets` | `wallet:read` | List wallets (filterable: `status`, `limit`, `offset`) |
+| GET | `/v1/wallets/:id` | `wallet:read` | Get wallet details with deposit/sweep status |
 
 ### Admin Endpoints (Bearer Token Auth)
 
 **Header:** `Authorization: Bearer <ADMIN_SECRET>`
 
+#### API Keys
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/v1/admin/api-keys` | Create API key |
-| GET | `/v1/admin/api-keys` | List API keys |
-| GET | `/v1/admin/api-keys/:keyId` | Get key details |
-| PATCH | `/v1/admin/api-keys/:keyId` | Update key |
-| DELETE | `/v1/admin/api-keys/:keyId` | Revoke key |
-| POST | `/v1/admin/sessions/:reference/settle` | Manual settlement |
+| GET | `/v1/admin/api-keys` | List all API keys (filter: `merchantId`) |
+| GET | `/v1/admin/api-keys/:keyId` | Get API key details |
+| PATCH | `/v1/admin/api-keys/:keyId` | Update API key (name, permissions, tier, whitelist, settlementMode) |
+| DELETE | `/v1/admin/api-keys/:keyId` | Revoke API key |
+| GET | `/v1/admin/api-keys/:keyId/wallets` | View funding & parent wallet addresses |
+| PUT | `/v1/admin/api-keys/:keyId/wallets` | Set parent wallet addresses (sweep destinations) |
 
-### Payment Endpoints (HMAC Auth Required)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/v1/payments` | Create payment (any type) |
-| GET | `/v1/payments/:reference` | Get payment status |
-| POST | `/v1/payments/gifts/:reference/claim` | Claim a gift |
-| POST | `/v1/payments/requests/:reference/fulfill` | Fulfill a request |
-
-### Webhook Endpoints
+#### Payments
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/v1/webhooks/mongoro` | Mongoro settlement callbacks |
+| GET | `/v1/admin/payments` | List all payments (filterable) |
+| GET | `/v1/admin/payments/:reference` | Get payment details with settlement attempts |
+| POST | `/v1/admin/sessions/:reference/settle` | Manually mark payment as settled |
+
+#### Audit Logs
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/admin/audit-logs` | Get all audit logs (filter: `apiKeyId`, `merchantId`, `action`, `from`, `to`, `success`) |
+
+### Webhook Endpoints (Public — Provider-Verified)
+
+| Method | Endpoint | Verification | Description |
+|--------|----------|-------------|-------------|
+| POST | `/v1/webhooks/mongoro` | IP allowlist (`MONGORO_WEBHOOK_IPS`) | Mongoro settlement callbacks |
+| POST | `/v1/webhooks/paystack` | HMAC-SHA512 signature (`X-Paystack-Signature`) | Paystack transfer event callbacks |
 
 ### Legacy Endpoints (Deprecated)
 
-These still work but return deprecation headers. Use `/v1/payments` instead.
+These still work but return deprecation headers. Migrate to `/v1/payments`.
 
 | Deprecated | Use Instead |
 |------------|-------------|
-| `/v1/transfer/*` | `POST /v1/payments` with `type: "transfer"` |
-| `/v1/gifts/*` | `POST /v1/payments` with `type: "gift"` |
-| `/v1/requests/*` | `POST /v1/payments` with `type: "request"` |
+| `POST /v1/transfer/save` | `POST /v1/payments` with `type: "transfer"` |
+| `POST /v1/gifts/save` | `POST /v1/payments` with `type: "gift"` |
+| `POST /v1/requests/save` | `POST /v1/payments` with `type: "request"` |
 
 ---
 
@@ -200,7 +267,7 @@ X-Signature: abc123...        # HMAC-SHA256 signature
 
 ### Signature Generation (Node.js)
 
-**Important**: The HMAC key is `SHA256(secretKey)`, not the raw secret key. This allows us to store only the hash on the server while both client and server can compute the same HMAC key.
+**Important**: The HMAC key is `SHA256(secretKey)`, not the raw secret key. This allows the server to store only the hash while both sides compute the same HMAC key.
 
 ```javascript
 const crypto = require('crypto');
@@ -217,33 +284,98 @@ const bodyHash = crypto.createHash('sha256').update(body).digest('hex');
 // Step 2: Build payload
 const payload = `${timestamp}|${method}|${path}|${bodyHash}`;
 
-// Step 3: Derive HMAC key from secret (SHA256 of secretKey)
+// Step 3: Derive HMAC key (SHA256 of secretKey)
 const hmacKey = crypto.createHash('sha256').update(secretKey).digest('hex');
 
 // Step 4: Generate signature
 const signature = crypto.createHmac('sha256', hmacKey).update(payload).digest('hex');
 ```
 
-**Why SHA256(secretKey)?**
-- Server stores `SHA256(secretKey)` in database (never the raw secret)
-- Client computes `SHA256(secretKey)` locally
-- Both sides use the same derived key for HMAC
-- If database is breached, attacker cannot reverse the hash to get original secret
-
 ### Admin Authentication
-
-Admin endpoints use Bearer token:
 
 ```
 Authorization: Bearer <ADMIN_SECRET>
 ```
 
+### API Key Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `keyId` | string | Public key (`pk_xxxxx`) |
+| `merchantId` | string | Associated merchant |
+| `permissions` | string[] | e.g. `['payment:create', 'wallet:read']` |
+| `rateLimitTier` | `standard` \| `premium` \| `unlimited` | Rate limit bucket |
+| `ipWhitelist` | string[] \| null | CIDR ranges allowed to use this key |
+| `settlementMode` | `mongoro` \| `paystack` \| `self` | How fiat is disbursed for this key's payments |
+| `parentWalletBitcoin` | string \| null | BTC sweep destination |
+| `parentWalletEthereum` | string \| null | ETH/BSC sweep destination |
+| `parentWalletTron` | string \| null | TRX sweep destination |
+
+### Rate Limit Tiers
+
+| Tier | Req/Min | Req/Month | Wallets/Month | Max Watches |
+|------|---------|-----------|--------------|-------------|
+| `standard` | 60 | 50,000 | 1,000 | 100 |
+| `premium` | 500 | 1,000,000 | 50,000 | 1,000 |
+| `unlimited` | 1,000 | Unlimited | Unlimited | 10,000 |
+
 ### Security Features
 
-- **Rate Limiting**: 100/1000/10000 requests per minute by tier
+- **Rate Limiting**: Per-tier limits enforced on HMAC-authenticated endpoints
 - **IP Whitelisting**: Per-API-key with CIDR support
 - **Audit Logging**: All requests logged with timestamps, IPs, response times
 - **Security Headers**: XSS, HSTS, CSP, no-cache
+
+---
+
+## Settlement Modes
+
+Settlement mode is set per API key (`settlementMode` field). It determines how fiat is disbursed after a deposit is confirmed.
+
+### 1. Mongoro (`settlementMode: "mongoro"`)
+
+Default mode. The engine calls Mongoro's bank transfer API automatically.
+
+- Transfer initiated → session status: `settling`
+- Mongoro webhook (`POST /v1/webhooks/mongoro`) confirms result
+- On success → `settled`; on failure/reversal → Telegram alert → stays in `settling` for manual resolution
+- Webhook is IP-allowlisted via `MONGORO_WEBHOOK_IPS`
+
+### 2. Paystack (`settlementMode: "paystack"`)
+
+The engine initiates a Paystack bank transfer automatically.
+
+- Pre-transfer balance check: if Paystack balance < payment amount, alert sent and session stays in `settling`
+- Transfer initiated → session status: `settling`
+- Paystack webhook (`POST /v1/webhooks/paystack`) confirms result via HMAC-SHA512 signature
+- On `transfer.success` → `settled`
+- On `transfer.failed`/`transfer.reversed` due to insufficient funds → Telegram alert, stays in `settling`
+- After each successful transfer, balance is checked against `PAYSTACK_LOW_BALANCE_THRESHOLD`
+- Paystack recipient codes are cached on the `receivers` table to avoid a redundant API call on repeat transfers to the same account
+
+### 3. Self (`settlementMode: "self"`)
+
+For integrators (e.g. banks) who handle fiat disbursement themselves.
+
+**Flow:**
+1. Deposit confirmed → engine generates a one-time `settlementToken` (64-char hex, 24h expiry)
+2. `payment.settling` webhook fired — `settlementToken` included in payload
+3. Integrator sends fiat to receiver
+4. Integrator calls `POST /v1/payments/:reference/settle` with the token to mark payment settled
+
+```json
+POST /v1/payments/2S-XXXXXX/settle
+{
+  "settlementToken": "<token_from_webhook>",
+  "settlementReference": "your-internal-ref"  // optional
+}
+```
+
+**Security guarantees:**
+- Token compared with `crypto.timingSafeEqual` (constant-time, prevents timing attacks)
+- Token is one-time: nulled after first successful use
+- Token expires after 24 hours
+- Requires valid HMAC auth on the settle endpoint
 
 ---
 
@@ -264,25 +396,23 @@ Authorization: Bearer <ADMIN_SECRET>
                               [request without crypto]
                                        ↓
 created → pending → confirming → confirmed → settling → settled
-   ↓         ↓                       ↓
-[fulfill] [deposit]              [if fails]
-                                     ↓
-                    expired / failed / settlement_reversed
+   ↓         ↓                                ↓
+[fulfill] [deposit]                    settlement_reversed
+             ↓
+          expired / failed
 ```
 
 | Status | Description |
 |--------|-------------|
 | `created` | Request created without crypto (awaiting fulfillment) |
 | `pending` | Payment has deposit address, awaiting crypto deposit |
-| `confirming` | Deposit detected, awaiting confirmations |
+| `confirming` | Deposit detected, awaiting blockchain confirmations |
 | `confirmed` | Fully confirmed, ready for settlement |
 | `settling` | Fiat payout in progress |
 | `settled` | Complete |
-| `expired` | Timed out |
-| `failed` | Error occurred |
-| `settlement_reversed` | Fiat payout reversed |
-
-**Note:** Transfers and gifts start at `pending` (have deposit address immediately). Requests without crypto start at `created` and move to `pending` when fulfilled.
+| `expired` | Timed out without deposit |
+| `failed` | Unrecoverable error |
+| `settlement_reversed` | Fiat payout reversed by provider |
 
 ### 1. Transfer Flow
 
@@ -303,10 +433,11 @@ POST /v1/payments
 }
 ```
 
-1. Create payment → Returns `depositAddress`
+1. Rate locked, deposit address assigned → status: `pending`
 2. Payer sends crypto to `depositAddress`
-3. Watcher detects deposit → Status: `confirmed`
-4. Settlement sends fiat → Status: `settled`
+3. Watcher detects deposit → status: `confirming`
+4. Required confirmations reached → status: `confirmed`
+5. Settlement sends fiat → status: `settling` → `settled`
 
 ### 2. Gift Flow
 
@@ -322,11 +453,10 @@ POST /v1/payments
 }
 ```
 
-1. Create gift → Returns `reference`
-2. Sender pays crypto
-3. Deposit confirmed
-4. Sender shares `reference` with recipient
-5. Recipient claims:
+1. No receiver at creation — deposit address assigned, status: `pending`
+2. Sender pays crypto → deposit confirms
+3. Sender shares `reference` with recipient
+4. Recipient claims:
 
 ```json
 POST /v1/payments/gifts/2S-XXXXXX/claim
@@ -339,13 +469,15 @@ POST /v1/payments/gifts/2S-XXXXXX/claim
 }
 ```
 
-6. Settlement sends fiat
+5. Settlement sends fiat → `settled`
+   - If session was already `confirmed` before claim, settlement fires immediately
+   - If still `pending`/`confirming`, settlement fires after confirmation
 
 ### 3. Request Flow
 
-Payment requests allow the receiver to specify only the fiat amount they want. The payer chooses which crypto to pay with when fulfilling the request, and the exchange rate is locked at that moment.
+The receiver specifies the fiat amount. The payer chooses which crypto to pay when fulfilling. Rate locks at fulfillment time — not at creation.
 
-**Step 1: Create Request (crypto/network optional)**
+**Step 1: Create Request**
 
 ```json
 POST /v1/payments
@@ -361,26 +493,11 @@ POST /v1/payments
 }
 ```
 
-Response:
-```json
-{
-  "success": true,
-  "payment": {
-    "reference": "2S-XXXXXX",
-    "status": "created",
-    "fiatAmount": 15000,
-    "fiatCurrency": "NGN",
-    "depositAddress": null,
-    "cryptoAmount": null,
-    "crypto": null,
-    "network": null
-  }
-}
-```
+Response: status `created`, no deposit address yet.
 
-**Step 2: Requester shares `reference` with payer**
+**Step 2: Share `reference` with payer**
 
-**Step 3: Payer fulfills (provides crypto/network)**
+**Step 3: Payer fulfills**
 
 ```json
 POST /v1/payments/requests/2S-XXXXXX/fulfill
@@ -391,44 +508,28 @@ POST /v1/payments/requests/2S-XXXXXX/fulfill
 }
 ```
 
-Response (rate locked, crypto amount calculated):
-```json
-{
-  "success": true,
-  "payment": {
-    "reference": "2S-XXXXXX",
-    "status": "pending",
-    "depositAddress": "T...",
-    "cryptoAmount": 9.75,
-    "crypto": "USDT",
-    "network": "trc20",
-    "rate": 1538.46,
-    "fiatAmount": 15000
-  }
-}
-```
+Response: rate locked, `depositAddress` and `cryptoAmount` assigned, status → `pending`.
 
-**Step 4: Payer sends crypto to `depositAddress`**
+**Step 4–5:** Payer sends crypto → watcher confirms → settlement sends fiat
 
-**Step 5: Deposit confirmed → Settlement to requester**
+> **Shortcut:** Pass `crypto`/`network` at creation to lock rate immediately and skip fulfillment (starts at `pending` directly).
 
-**Alternative: Pre-specified crypto**
-
-If you know which crypto the payer will use, you can specify it at creation:
+### 4. Merchant Flow
 
 ```json
 POST /v1/payments
 {
-  "type": "request",
-  "fiatAmount": 15000,
+  "type": "merchant",
+  "fiatAmount": 5000,
   "fiatCurrency": "NGN",
-  "crypto": "ETH",
-  "network": "ethereum",
-  "receiver": { ... }
+  "crypto": "USDT",
+  "network": "trc20",
+  "merchantId": "store-xyz",
+  "callbackUrl": "https://yourstore.com/callback"
 }
 ```
 
-This will return `status: "pending"` with `depositAddress` immediately (rate locked at creation).
+Rate locked, deposit address assigned, status: `pending`. Show hosted checkout at `pay.2settle.io/p/:reference`. On success, redirect to `callbackUrl?reference=...&status=settled`.
 
 ### Supported Crypto/Network Combinations
 
@@ -443,6 +544,45 @@ This will return `status: "pending"` with `depositAddress` immediately (rate loc
 
 ---
 
+## Wallet-as-a-Service (WaaS)
+
+Provision unique HD-derived deposit addresses for external platforms to monitor on-chain deposits independently.
+
+### Provision a Wallet
+
+```json
+POST /v1/wallets
+{
+  "network": "trc20",
+  "externalId": "user-123",
+  "webhookUrl": "https://yourapp.com/webhooks/deposit"
+}
+```
+
+Returns a unique `depositAddress`. When a deposit is detected, the engine fires a `deposit.confirmed` webhook to `webhookUrl`.
+
+### List Wallets
+
+```
+GET /v1/wallets?status=active&limit=50&offset=0
+```
+
+### Get Wallet
+
+```
+GET /v1/wallets/:id
+```
+
+### Tier Quotas
+
+| Tier | Wallets/Month | Max Active Watches |
+|------|--------------|--------------------|
+| `standard` | 1,000 | 100 |
+| `premium` | 50,000 | 1,000 |
+| `unlimited` | Unlimited | 10,000 |
+
+---
+
 ## HD Wallet Setup
 
 HD wallet provides unlimited unique deposit addresses derived from a single seed phrase.
@@ -453,7 +593,7 @@ HD wallet provides unlimited unique deposit addresses derived from a single seed
 node generate-hd-keys.js
 ```
 
-Enter your 12 or 24 word mnemonic (ALL ON ONE LINE). It outputs:
+Enter your 12 or 24-word mnemonic (ALL ON ONE LINE). It outputs:
 
 ```
 HD_WALLET_ENABLED=true
@@ -468,67 +608,76 @@ Add these to your `.env` file.
 | Chain | Path | Networks |
 |-------|------|----------|
 | Bitcoin | `m/84'/0'/0'/0/{index}` | bitcoin |
-| Ethereum | `m/44'/60'/0'/0/{index}` | ethereum, bsc, polygon, base, erc20, bep20 |
+| Ethereum | `m/44'/60'/0'/0/{index}` | ethereum, bsc, erc20, bep20 |
 | Tron | `m/44'/195'/0'/0/{index}` | tron, trc20 |
 
 ### Disable HD Wallet
-
-To use legacy wallet pool:
 
 ```env
 HD_WALLET_ENABLED=false
 ```
 
+Falls back to legacy wallet pool.
+
 ---
 
 ## Database Setup
 
-### Run All Migrations
+### Run All Migrations (in order)
 
 ```sql
 -- Core payment tables
-source src/services/payment-engine/migrations/001_create_payment_tables.sql
+SOURCE src/services/payment-engine/migrations/001_create_payment_tables.sql;
+
+-- Settlement token columns (self-settlement hardening)
+SOURCE src/services/payment-engine/migrations/002_add_settlement_token.sql;
+
+-- Paystack recipient code cache
+SOURCE src/services/payment-engine/migrations/003_add_paystack_recipient_code.sql;
 
 -- HD wallet tables
-source src/services/payment-engine/hd-wallet/migrations/001_create_hd_wallet_tables.sql
+SOURCE src/services/payment-engine/hd-wallet/migrations/001_create_hd_wallet_tables.sql;
 
 -- Watcher tables
-source src/services/payment-engine/watcher/migrations/001_create_watcher_tables.sql
+SOURCE src/services/payment-engine/watcher/migrations/001_create_watcher_tables.sql;
 
 -- Settlement tables
-source src/services/payment-engine/settlement/migrations/001_create_settlement_tables.sql
+SOURCE src/services/payment-engine/settlement/migrations/001_create_settlement_tables.sql;
 
 -- Security tables
-source src/security/migrations/001_create_security_tables.sql
+SOURCE src/security/migrations/001_create_security_tables.sql;
 ```
 
 ### Core Tables
 
 | Table | Description |
 |-------|-------------|
-| `payment_sessions` | Main payment records |
-| `payers` | Payer information |
-| `receivers` | Receiver bank details |
+| `payment_sessions` | Main payment records — status, amounts, deposit address, settlement info |
+| `payers` | Payer identity (chatId, phone, wallet address) |
+| `receivers` | Receiver bank details + `paystack_recipient_code` cache |
 | `wallets` | Legacy wallet pool |
-| `rates` | Exchange rates |
-| `transfers` | Legacy transfer records |
-| `gifts` | Legacy gift records |
-| `requests` | Legacy request records |
+| `rates` | Exchange rate cache |
+
+### Settlement Tables
+
+| Table | Description |
+|-------|-------------|
+| `settlement_attempts` | Per-attempt log: provider, status, reference, error |
 
 ### HD Wallet Tables
 
 | Table | Description |
 |-------|-------------|
-| `hd_wallet_config` | Derivation index per chain |
-| `derived_addresses` | Audit trail |
+| `hd_wallet_config` | Current derivation index per chain |
+| `derived_addresses` | Audit trail of all derived addresses |
 | `sweep_transactions` | Sweep records |
 
 ### Security Tables
 
 | Table | Description |
 |-------|-------------|
-| `api_keys` | API credentials |
-| `audit_logs` | Request audit trail |
+| `api_keys` | API credentials, permissions, settlement mode, wallet config |
+| `audit_logs` | Full request audit trail |
 
 ---
 
@@ -542,9 +691,9 @@ pnpm dev
 
 ### 2. Test Public Endpoints
 
-- `GET http://localhost:3500/v1/health`
-- `GET http://localhost:3500/v1/rate/current`
-- `GET http://localhost:3500/v1/banks`
+- `GET http://localhost:3500/v1/rate`
+- `GET http://localhost:3500/v1/banks/list?name=access`
+- `POST http://localhost:3500/v1/banks/resolve` → `{ "accountNumber": "...", "bankCode": "..." }`
 
 ### 3. Create API Key
 
@@ -561,7 +710,8 @@ Body:
 {
   "merchantId": "test-merchant",
   "name": "Test Key",
-  "tier": "standard"
+  "tier": "standard",
+  "settlementMode": "self"
 }
 ```
 
@@ -574,12 +724,9 @@ Variables:
 - `apiKey`: `<your_public_key>`
 - `secretKey`: `<your_secret_key>`
 
-### 5. Add Pre-request Script
-
-Add this to your Postman **Collection** (not individual requests):
+### 5. Add Pre-request Script (Collection level)
 
 ```javascript
-// Modern Postman approach - use require instead of deprecated global CryptoJS
 const CryptoJS = require('crypto-js');
 
 const secretKey = pm.environment.get('secretKey');
@@ -594,7 +741,6 @@ const timestamp = Date.now().toString();
 const method = pm.request.method;
 const path = pm.request.url.getPath();
 
-// Get raw body and normalize to minified JSON (must match server's JSON.stringify)
 let body = pm.request.body ? pm.request.body.raw : '{}';
 try {
     body = JSON.stringify(JSON.parse(body || '{}'));
@@ -602,42 +748,25 @@ try {
     body = '{}';
 }
 
-// Step 1: Hash the body
 const bodyHash = CryptoJS.SHA256(body).toString();
-
-// Step 2: Build payload
 const payload = `${timestamp}|${method}|${path}|${bodyHash}`;
-
-// Step 3: Derive HMAC key from secret (SHA256 of secretKey)
 const hmacKey = CryptoJS.SHA256(secretKey).toString();
-
-// Step 4: Generate signature using derived key
 const signature = CryptoJS.HmacSHA256(payload, hmacKey).toString();
 
-// Set headers
 pm.request.headers.upsert({ key: 'X-API-Key', value: apiKey });
 pm.request.headers.upsert({ key: 'X-Timestamp', value: timestamp });
 pm.request.headers.upsert({ key: 'X-Signature', value: signature });
 pm.request.headers.upsert({ key: 'Content-Type', value: 'application/json' });
-
-// Debug logging (check Postman Console)
-console.log('=== HMAC Auth Debug ===');
-console.log('Path:', path);
-console.log('Body:', body);
-console.log('Body Hash:', bodyHash);
-console.log('Payload:', payload);
-console.log('Signature:', signature);
 ```
 
 **Key points:**
-- Uses `require('crypto-js')` instead of deprecated global `CryptoJS`
-- Body is parsed and re-stringified to ensure consistent minified JSON
+- Body is parsed and re-stringified to ensure minified JSON (must match server)
 - HMAC key is `SHA256(secretKey)`, not the raw secret
 
 ### 6. Test Payments
 
 **Create Transfer:**
-```
+```json
 POST {{baseUrl}}/payments
 {
   "type": "transfer",
@@ -659,59 +788,31 @@ POST {{baseUrl}}/payments
 GET {{baseUrl}}/payments/2S-XXXXXX
 ```
 
----
-
-## Project Structure
-
+**Get Own Payments:**
 ```
-src/
-├── index.ts                    # Express app entry
-├── config/                     # Environment config
-├── routes/
-│   ├── index.ts               # Route aggregator
-│   ├── payment.routes.ts      # Unified /payments routes
-│   ├── transfer.routes.ts     # Legacy (deprecated)
-│   ├── gift.routes.ts         # Legacy (deprecated)
-│   ├── request.routes.ts      # Legacy (deprecated)
-│   ├── rate.routes.ts
-│   ├── bank.routes.ts
-│   └── crypto.routes.ts
-├── services/payment-engine/
-│   ├── payment-engine.ts       # Main facade
-│   ├── session/                # Session management
-│   ├── hd-wallet/              # HD derivation
-│   ├── sweeper/                # Fund sweeping
-│   ├── watcher/                # Deposit monitoring
-│   ├── settlement/             # Fiat payout
-│   ├── participant/            # Payer/Receiver
-│   ├── sync/                   # Legacy sync
-│   ├── rate/
-│   ├── charges/
-│   └── types.ts
-├── security/
-│   ├── middleware/
-│   │   ├── authenticate.ts
-│   │   ├── adminAuth.ts
-│   │   ├── rateLimit.ts
-│   │   ├── ipWhitelist.ts
-│   │   ├── auditLog.ts
-│   │   └── securityHeaders.ts
-│   └── services/
-├── validation/
-│   └── payment.schemas.ts
-├── middleware/
-│   ├── deprecation.ts
-│   └── errorHandler.ts
-├── lib/mysql.ts
-└── utils/crypto.ts
+GET {{baseUrl}}/me/payments?status=settling&limit=20
+```
+
+**Get Payment Stats:**
+```
+GET {{baseUrl}}/me/payments/stats
+```
+
+**Confirm Self-Settlement:**
+```json
+POST {{baseUrl}}/payments/2S-XXXXXX/settle
+{
+  "settlementToken": "<token_from_webhook_payload>",
+  "settlementReference": "your-internal-txn-id"
+}
 ```
 
 ---
 
 ## Deposit Watcher
 
-| Chain | API | Confirmations | Polling |
-|-------|-----|---------------|---------|
+| Chain | API | Confirmations Required | Default Poll |
+|-------|-----|----------------------|--------------|
 | Bitcoin | Blockstream | 2 | 60s |
 | Ethereum | Etherscan | 12 | 15s |
 | BSC | BscScan | 15 | 5s |
@@ -721,34 +822,71 @@ src/
 
 - Zero-confirmation rejection
 - RBF detection (Bitcoin)
-- Fake token filtering
-- Dust filtering
-- Amount validation (2% tolerance)
+- Fake token contract filtering
+- Dust amount filtering
+- Amount validation (2% tolerance by default)
 
 ---
 
 ## Settlement
 
-Automatic fiat payout via Mongoro with Telegram fallback.
+After a deposit is confirmed the settlement service fires automatically based on the API key's `settlementMode`. See [Settlement Modes](#settlement-modes) for full details.
 
-1. Deposit confirmed → Settlement triggered
-2. Mongoro sends bank transfer
-3. Success → `settled`
-4. Failure → Telegram alert → Manual pay → `/settle {ref}`
+**Failure handling:**
+- Any settlement failure sends a Telegram alert (if configured)
+- Session stays in `settling` — it is NOT marked `failed` — so the admin can resolve manually
+- Admin can manually mark settled via `POST /v1/admin/sessions/:reference/settle`
 
 ---
 
-## Code Style
+## Project Structure
 
-- TypeScript strict mode
-- Zod for validation
-- Parameterized SQL queries
-- Error classes extend `PaymentEngineError` or `SecurityError`
-
-## Testing
-
-```bash
-pnpm test           # Watch mode
-pnpm test:run       # Single run
-pnpm coverage       # With coverage
+```
+src/
+├── index.ts                          # Express app entry
+├── config/                           # Environment config
+├── routes/
+│   ├── index.ts                      # Route aggregator
+│   ├── payment.routes.ts             # Unified /payments routes
+│   ├── me.routes.ts                  # /me/* — own key data
+│   ├── wallet.routes.ts              # /wallets — WaaS
+│   ├── webhook.routes.ts             # /webhooks/mongoro, /webhooks/paystack
+│   ├── auth.routes.ts                # /auth/login
+│   ├── rate.routes.ts
+│   ├── bank.routes.ts
+│   ├── crypto.routes.ts
+│   ├── admin/
+│   │   ├── index.ts
+│   │   ├── apiKey.routes.ts
+│   │   ├── payments.routes.ts
+│   │   └── auditLog.routes.ts
+│   └── [legacy] transfer, gift, request, transaction routes
+├── services/payment-engine/
+│   ├── payment-engine.ts             # Main facade
+│   ├── session/                      # Session management + state machine
+│   ├── hd-wallet/                    # HD derivation (BIP32/44/84)
+│   ├── sweeper/                      # Fund sweeping to hot wallets
+│   ├── watcher/                      # On-chain deposit monitoring
+│   ├── settlement/
+│   │   ├── settlement.service.ts     # Orchestrator
+│   │   ├── mongoro.service.ts        # Mongoro adapter
+│   │   ├── paystack.service.ts       # Paystack adapter
+│   │   └── telegram.service.ts       # Alert service
+│   ├── participant/                  # Payer/Receiver upsert
+│   ├── rate/                         # CoinMarketCap + rate locking
+│   └── charges/                      # Fee calculation
+├── security/
+│   ├── middleware/
+│   │   ├── authenticate.ts           # HMAC verification
+│   │   ├── adminAuth.ts
+│   │   ├── rateLimit.ts
+│   │   ├── ipWhitelist.ts
+│   │   ├── auditLog.ts
+│   │   └── securityHeaders.ts
+│   └── services/
+│       └── apiKey.service.ts
+├── validation/
+│   └── payment.schemas.ts            # Zod schemas
+├── lib/mysql.ts
+└── utils/
 ```

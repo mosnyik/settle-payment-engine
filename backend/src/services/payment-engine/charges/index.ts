@@ -8,6 +8,7 @@ export {
   getFiatCharge,
   fiatChargeToCrypto,
   calculateCharges,
+  calculateChargesFromCrypto,
   formatCryptoAmount,
   formatFiatAmount,
 } from './charge-calculator';

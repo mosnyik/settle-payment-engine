@@ -11,7 +11,7 @@ import { participantService } from '../services/payment-engine/participant';
 import { legacySyncService } from '../services/payment-engine/sync';
 import {
   createPaymentSchema,
-  verifyGiftClaimSchema,
+  verifyReceiverSchema,
   claimGiftSchema,
   fulfillRequestSchema,
 } from '../validation/payment.schemas';
@@ -62,11 +62,13 @@ router.post(
         : apiKey.parentWalletEthereum) ?? undefined;
     }
 
-    // Resolve receiver via NUBAN before creating session (if provided)
+    // Resolve receiver via NUBAN before creating session (if provided).
+    // bankCode comes from the client (via GET /banks/list or POST /verify-receiver).
+    // bankName and accountName are always resolved server-side — never trusted from client.
     let resolvedReceiver: { bankCode: string; accountNumber: string; accountName: string; bankName: string } | undefined;
     if (input.receiver) {
-      resolvedReceiver = await bankService.resolveReceiver(
-        input.receiver.bankName,
+      resolvedReceiver = await bankService.resolveAccount(
+        input.receiver.bankCode,
         input.receiver.accountNumber
       );
     }
@@ -75,6 +77,7 @@ router.post(
     const session = await paymentEngine.createPayment({
       type: input.type,
       fiatAmount: input.fiatAmount,
+      cryptoAmount: input.cryptoAmount,
       fiatCurrency: input.fiatCurrency,
       crypto: input.crypto as any,
       network: input.network as any,
@@ -87,6 +90,7 @@ router.post(
         bankCode: resolvedReceiver.bankCode,
         accountNumber: resolvedReceiver.accountNumber,
         accountName: resolvedReceiver.accountName,
+        bankName: resolvedReceiver.bankName,
       } : undefined,
       merchantId: input.merchantId,
       merchantReference: input.merchantReference,
@@ -108,6 +112,7 @@ router.post(
         bankCode: resolvedReceiver.bankCode,
         accountNumber: resolvedReceiver.accountNumber,
         accountName: resolvedReceiver.accountName,
+        bankName: resolvedReceiver.bankName,
       } as any);
       await paymentEngine.setReceiverId(session.id, receiverId);
     }
@@ -134,7 +139,7 @@ router.post(
         expiresAt: updatedSession.expiresAt,
       },
     });
-  } catch (err) {
+  } catch (err: any) {
     if (err instanceof PaymentEngineError) {
       return res.status(err.statusCode).json({
         success: false,
@@ -142,9 +147,71 @@ router.post(
         code: err.code,
       });
     }
+    if (err.message === 'NUBAN_SERVICE_UNAVAILABLE') {
+      return res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+    if (err.message?.includes('Could not verify account details')) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
     next(err);
   }
 });
+
+// =============================================================================
+// VERIFY RECEIVER
+// =============================================================================
+
+/**
+ * POST /payments/verify-receiver
+ *
+ * Resolves a bank account via NUBAN and returns verified details for the
+ * client to show the user before creating a payment. No session is created.
+ *
+ * Requires bankCode (from GET /banks/list) + accountNumber.
+ * bankName is auto-looked up from our banks table — NUBAN doesn't return it.
+ *
+ * Used before:
+ *  - POST /payments (type: transfer)  — confirm who you're sending to
+ *  - POST /payments (type: request)   — requester confirms their own payout account
+ *  - POST /payments/gifts/:ref/claim/confirm — recipient confirms before claiming gift
+ */
+router.post(
+  '/verify-receiver',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const parsed = verifyReceiverSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: parsed.error.flatten(),
+        });
+      }
+
+      const { bankCode, accountNumber } = parsed.data;
+
+      const resolved = await bankService.resolveAccount(bankCode, accountNumber);
+
+      return res.json({
+        success: true,
+        receiver: {
+          accountName: resolved.accountName,
+          accountNumber: resolved.accountNumber,
+          bankName: resolved.bankName,
+          bankCode: resolved.bankCode,
+        },
+      });
+    } catch (err: any) {
+      if (err.message === 'NUBAN_SERVICE_UNAVAILABLE') {
+        return res.status(500).json({ success: false, error: 'Internal server error' });
+      }
+      if (err.message?.includes('Could not verify account details')) {
+        return res.status(400).json({ success: false, error: err.message });
+      }
+      next(err);
+    }
+  }
+);
 
 // =============================================================================
 // GET PAYMENT
@@ -209,70 +276,11 @@ router.get(
 // CLAIM GIFT — STEP 1: VERIFY
 // =============================================================================
 
-/**
- * POST /payments/gifts/:reference/claim/verify
- *
- * Step 1 of gift claim. Validates the gift and resolves the recipient's
- * bank details via NUBAN. Returns verified account info for the user to confirm.
- * Does NOT create the receiver or trigger settlement yet.
- */
-router.post(
-  '/gifts/:reference/claim/verify',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { reference } = req.params;
-
-      const parsed = verifyGiftClaimSchema.safeParse(req.body);
-      if (!parsed.success) {
-        return res.status(400).json({
-          success: false,
-          error: 'Validation failed',
-          details: parsed.error.flatten(),
-        });
-      }
-
-      // Validate the gift
-      const session = await paymentEngine.getPaymentByReference(reference);
-
-      if (session.type !== 'gift') {
-        return res.status(400).json({ success: false, error: 'Payment is not a gift' });
-      }
-
-      if (session.status !== 'confirmed') {
-        return res.status(400).json({ success: false, error: 'Gift has not been paid yet' });
-      }
-
-      if (session.receiverId) {
-        return res.status(400).json({ success: false, error: 'Gift has already been claimed' });
-      }
-
-      // Resolve bank details via NUBAN — bank name from our DB as fallback
-      const resolved = await bankService.resolveReceiver(
-        parsed.data.bankName,
-        parsed.data.accountNumber
-      );
-
-      return res.json({
-        success: true,
-        message: 'Please confirm your bank details',
-        receiver: {
-          accountName: resolved.accountName,
-          accountNumber: resolved.accountNumber,
-          bankName: resolved.bankName,
-          bankCode: resolved.bankCode,
-        },
-      });
-    } catch (err: any) {
-      if (err instanceof PaymentEngineError) {
-        return res.status(err.statusCode).json({ success: false, error: err.message, code: err.code });
-      }
-      if (err.message?.includes('Bank not found') || err.message?.includes('Account not found')) {
-        return res.status(400).json({ success: false, error: err.message });
-      }
-      next(err);
-    }
-  }
-);
+// Removed: POST /payments/gifts/:reference/claim/verify
+// Use POST /payments/verify-receiver instead — it serves the same purpose
+// (NUBAN lookup + return account details for confirmation) without being
+// scoped to a specific gift reference. The confirm step below re-validates
+// the session state so nothing is lost.
 
 // =============================================================================
 // CLAIM GIFT — STEP 2: CONFIRM
@@ -314,9 +322,9 @@ router.post(
         return res.status(400).json({ success: false, error: 'Gift has already been claimed' });
       }
 
-      // Re-resolve via NUBAN — accountName always comes from here, never from client
-      const resolved = await bankService.resolveReceiver(
-        parsed.data.bankName,
+      // Re-resolve via NUBAN — accountName and bankName always come from server, never from client
+      const resolved = await bankService.resolveAccount(
+        parsed.data.bankCode,
         parsed.data.accountNumber
       );
 
@@ -356,7 +364,10 @@ router.post(
       if (err instanceof PaymentEngineError) {
         return res.status(err.statusCode).json({ success: false, error: err.message, code: err.code });
       }
-      if (err.message?.includes('Bank not found') || err.message?.includes('Account not found')) {
+      if (err.message === 'NUBAN_SERVICE_UNAVAILABLE') {
+        return res.status(500).json({ success: false, error: 'Internal server error' });
+      }
+      if (err.message?.includes('Bank not found') || err.message?.includes('Could not verify account details')) {
         return res.status(400).json({ success: false, error: err.message });
       }
       next(err);

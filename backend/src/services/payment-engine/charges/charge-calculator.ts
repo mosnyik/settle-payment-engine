@@ -122,6 +122,49 @@ export function calculateCharges(
   };
 }
 
+/**
+ * Reverse (crypto-first) charge calculation.
+ *
+ * Given the total crypto amount the payer will send, derives the fiat amount
+ * the receiver gets after subtracting the flat platform fee.
+ *
+ * Algorithm (converges in ≤ 2 iterations):
+ *  1. grossFiat = cryptoAmount × assetPrice × rate
+ *  2. Look up tier for grossFiat → fiatCharge1
+ *  3. netFiat1 = grossFiat - fiatCharge1
+ *  4. Look up tier for netFiat1 → fiatCharge2 (may differ if netFiat1 crossed a boundary)
+ *  5. netFiat = grossFiat - fiatCharge2  ← always stable after one correction
+ *  6. Validate netFiat within AMOUNT_LIMITS
+ *  7. Delegate to calculateCharges(netFiat, ...) for a consistent ChargeResult
+ */
+export function calculateChargesFromCrypto(
+  cryptoAmount: number,
+  crypto: CryptoCurrency,
+  rateLock: RateLock,
+  tiers: FeeTier[] = DEFAULT_FEE_TIERS
+): ChargeResult & { derivedFiatAmount: number } {
+  // Step 1: gross fiat equivalent of the full crypto amount
+  const grossFiat = crypto === 'USDT'
+    ? cryptoAmount * rateLock.rate
+    : cryptoAmount * rateLock.assetPrice * rateLock.rate;
+
+  // Steps 2–3: first fee estimate
+  const tier1 = getFeeTier(grossFiat, tiers);
+  const netFiat1 = grossFiat - tier1.feeAmount;
+
+  // Steps 4–5: one correction pass (handles tier boundary crossover)
+  const tier2 = getFeeTier(netFiat1, tiers);
+  const netFiat = grossFiat - tier2.feeAmount;
+
+  // Step 6: validate derived fiat is within engine limits
+  validateAmount(netFiat);
+
+  // Step 7: canonical forward calculation for consistent output fields
+  const result = calculateCharges(netFiat, crypto, rateLock, tiers);
+
+  return { ...result, derivedFiatAmount: netFiat };
+}
+
 export function formatCryptoAmount(
   amount: number,
   crypto: CryptoCurrency

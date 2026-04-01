@@ -39,11 +39,11 @@ export const payerInputSchema = z.object({
 
 /**
  * Receiver input schema.
- * Client provides bank name (human-readable) and account number only.
- * Bank code and account name are resolved internally via NUBAN — never trusted from client.
+ * Client provides bankCode (from GET /banks/list or POST /payments/verify-receiver)
+ * and accountNumber. accountName and bankName are resolved internally via NUBAN.
  */
 export const receiverInputSchema = z.object({
-  bankName: z.string().min(1, 'Bank name is required'),
+  bankCode: z.string().min(1, 'Bank code is required'),
   accountNumber: z.string().min(1, 'Account number is required'),
   phone: z.string().optional(),
 });
@@ -55,7 +55,8 @@ export const receiverInputSchema = z.object({
 /** Base payment input (before type-specific validation) */
 const basePaymentSchema = z.object({
   type: z.enum(PAYMENT_TYPES),
-  fiatAmount: z.number().positive('Fiat amount must be positive'),
+  fiatAmount: z.number().positive('Fiat amount must be positive').optional(),
+  cryptoAmount: z.number().positive('Crypto amount must be positive').optional(),
   fiatCurrency: z.enum(FIAT_CURRENCIES),
   crypto: z.enum(CRYPTO_CURRENCIES).optional(), // Optional for request type (set at fulfillment)
   network: z.enum(NETWORKS).optional(), // Optional for request type (set at fulfillment)
@@ -69,6 +70,43 @@ const basePaymentSchema = z.object({
 
 /** Create payment schema with type-specific validation */
 export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => {
+  // ---- Amount field presence: at least one of fiatAmount / cryptoAmount required ----
+  const hasFiat = data.fiatAmount !== undefined;
+  const hasCrypto = data.cryptoAmount !== undefined;
+
+  if (!hasFiat && !hasCrypto) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Either fiatAmount or cryptoAmount is required',
+      path: ['fiatAmount'],
+    });
+  }
+
+  // Crypto-first path: fiatAmount absent, cryptoAmount present
+  if (!hasFiat && hasCrypto) {
+    if (data.type === 'request') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'cryptoAmount is not valid for request type — use fiatAmount instead',
+        path: ['cryptoAmount'],
+      });
+    }
+    if (!data.crypto) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'crypto is required when cryptoAmount is provided',
+        path: ['crypto'],
+      });
+    }
+    if (!data.network) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'network is required when cryptoAmount is provided',
+        path: ['network'],
+      });
+    }
+  }
+
   // Validate crypto-network compatibility (only if both are provided)
   const validNetworks: Record<string, string[]> = {
     BTC: ['bitcoin'],
@@ -170,18 +208,38 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
 });
 
 // =============================================================================
-// GIFT CLAIM SCHEMAS
+// VERIFY RECEIVER SCHEMA
 // =============================================================================
 
-/** Step 1: Verify receiver bank details (returns resolved account for confirmation) */
-export const verifyGiftClaimSchema = z.object({
-  bankName: z.string().min(1, 'Bank name is required'),
+/**
+ * Verify a bank account before creating a payment.
+ * NUBAN takes bank code + account number — bank name is looked up internally.
+ */
+export const verifyReceiverSchema = z.object({
+  bankCode: z.string().min(1, 'Bank code is required'),
   accountNumber: z.string().min(1, 'Account number is required'),
 });
 
-/** Step 2: Confirm and trigger settlement (same input — backend re-resolves via NUBAN) */
+export type VerifyReceiverInput = z.infer<typeof verifyReceiverSchema>;
+
+// =============================================================================
+// GIFT CLAIM SCHEMAS
+// =============================================================================
+
+/**
+ * Verify step for gift claim is handled by POST /payments/verify-receiver.
+ * This schema is kept for the confirm step only.
+ *
+ * @deprecated verifyGiftClaimSchema — verify step removed; use POST /payments/verify-receiver instead.
+ */
+// export const verifyGiftClaimSchema = z.object({
+//   bankName: z.string().min(1, 'Bank name is required'),
+//   accountNumber: z.string().min(1, 'Account number is required'),
+// });
+
+/** Confirm gift claim — triggers settlement. Client sends bankCode + accountNumber. */
 export const claimGiftSchema = z.object({
-  bankName: z.string().min(1, 'Bank name is required'),
+  bankCode: z.string().min(1, 'Bank code is required'),
   accountNumber: z.string().min(1, 'Account number is required'),
 });
 
@@ -237,6 +295,6 @@ export const paymentIdSchema = z.object({
 export type CreatePaymentInput = z.infer<typeof createPaymentSchema>;
 export type PayerInput = z.infer<typeof payerInputSchema>;
 export type ReceiverInput = z.infer<typeof receiverInputSchema>;
-export type VerifyGiftClaimInput = z.infer<typeof verifyGiftClaimSchema>;
+// export type VerifyGiftClaimInput = z.infer<typeof verifyGiftClaimSchema>; // removed with verifyGiftClaimSchema
 export type ClaimGiftInput = z.infer<typeof claimGiftSchema>;
 export type FulfillRequestInput = z.infer<typeof fulfillRequestSchema>;

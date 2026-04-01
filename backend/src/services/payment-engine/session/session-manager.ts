@@ -17,7 +17,7 @@ import {
 } from '../errors';
 import { generatePaymentIds } from '../utils';
 import { lockRate } from '../rate';
-import { calculateCharges } from '../charges';
+import { calculateCharges, calculateChargesFromCrypto } from '../charges';
 import { assignWallet, releaseWallet } from '../wallet';
 import { getHDWalletService } from '../hd-wallet';
 import { SessionRepository, sessionRepository, CreateSessionData } from './session-repository';
@@ -48,8 +48,27 @@ function validateCreateInput(input: CreatePaymentInput): void {
     throw new InvalidInputError('Payment type is required', 'type');
   }
 
-  if (!input.fiatAmount || input.fiatAmount <= 0) {
-    throw new InvalidInputError('Fiat amount must be positive', 'fiatAmount', input.fiatAmount);
+  const hasFiat = input.fiatAmount !== undefined && input.fiatAmount > 0;
+  const hasCryptoAmount = input.cryptoAmount !== undefined && input.cryptoAmount > 0;
+
+  if (!hasFiat && !hasCryptoAmount) {
+    throw new InvalidInputError(
+      'Either fiatAmount or cryptoAmount must be provided and positive',
+      'fiatAmount'
+    );
+  }
+
+  // Crypto-first path constraints (only applies when fiatAmount is absent)
+  if (!hasFiat && hasCryptoAmount) {
+    if (input.type === 'request') {
+      throw new InvalidInputError('cryptoAmount is not valid for request type', 'cryptoAmount');
+    }
+    if (!input.crypto) {
+      throw new InvalidInputError('crypto is required when cryptoAmount is provided', 'crypto');
+    }
+    if (!input.network) {
+      throw new InvalidInputError('network is required when cryptoAmount is provided', 'network');
+    }
   }
 
   if (!input.fiatCurrency) {
@@ -124,6 +143,26 @@ export class SessionManager {
   async createSession(input: CreatePaymentInput): Promise<PaymentSession> {
     validateCreateInput(input);
 
+    // ---- Crypto-first: resolve fiatAmount before the rest of the flow ----
+    // Triggered only when fiatAmount is absent and cryptoAmount is present.
+    // We lock the rate here and carry it forward so lockRate is not called twice.
+    let preLockedRate: import('../types').RateLock | undefined;
+    let resolvedInput: CreatePaymentInput = input;
+
+    if (input.fiatAmount === undefined && input.cryptoAmount !== undefined) {
+      preLockedRate = await lockRate(
+        input.crypto!,
+        input.fiatCurrency,
+        this.config.rateLockTtlMinutes
+      );
+      const reverseResult = calculateChargesFromCrypto(
+        input.cryptoAmount,
+        input.crypto!,
+        preLockedRate
+      );
+      resolvedInput = { ...input, fiatAmount: reverseResult.derivedFiatAmount };
+    }
+
     let ids = generatePaymentIds();
     let attempts = 0;
     const maxAttempts = 5;
@@ -138,15 +177,15 @@ export class SessionManager {
 
     // For requests without crypto/network, create session without wallet assignment
     // Crypto amount and rate will be calculated at fulfillment time
-    if (input.type === 'request' && (!input.crypto || !input.network)) {
+    if (resolvedInput.type === 'request' && (!resolvedInput.crypto || !resolvedInput.network)) {
       const expiresAt = new Date(Date.now() + this.config.sessionTtlMinutes * 60 * 1000);
 
       const sessionData: CreateSessionData = {
         id: ids.id,
         reference: ids.reference,
-        type: input.type,
-        fiatAmount: input.fiatAmount,
-        fiatCurrency: input.fiatCurrency,
+        type: resolvedInput.type,
+        fiatAmount: resolvedInput.fiatAmount!, // guaranteed: request type always uses fiatAmount
+        fiatCurrency: resolvedInput.fiatCurrency,
         // These will be set at fulfillment
         cryptoAmount: undefined,
         crypto: undefined,
@@ -155,27 +194,28 @@ export class SessionManager {
         assetPrice: undefined,
         chargeAmount: undefined,
         depositAddress: undefined,
-        merchantId: input.merchantId,
-        apiKeyId: input.apiKeyId,
-        fundingWalletIndex: input.fundingWalletIndex,
-        parentWallet: input.parentWallet,
+        merchantId: resolvedInput.merchantId,
+        apiKeyId: resolvedInput.apiKeyId,
+        fundingWalletIndex: resolvedInput.fundingWalletIndex,
+        parentWallet: resolvedInput.parentWallet,
         expiresAt,
-        metadata: input.metadata,
+        metadata: resolvedInput.metadata,
       };
 
       return this.repository.create(sessionData);
     }
 
-    // For transfers, gifts, and requests with crypto specified
-    const rateLock = await lockRate(
-      input.crypto!,
-      input.fiatCurrency,
+    // For transfers, gifts, and requests with crypto specified.
+    // Reuse the rate lock from the crypto-first reverse-calc if already obtained.
+    const rateLock = preLockedRate ?? await lockRate(
+      resolvedInput.crypto!,
+      resolvedInput.fiatCurrency,
       this.config.rateLockTtlMinutes
     );
 
     const charges = calculateCharges(
-      input.fiatAmount,
-      input.crypto!,
+      resolvedInput.fiatAmount!,
+      resolvedInput.crypto!,
       rateLock
     );
 
@@ -189,7 +229,7 @@ export class SessionManager {
 
     if (hdWallet?.isEnabled()) {
       // Use HD wallet derivation
-      const derivation = await hdWallet.deriveNextAddress(input.network!);
+      const derivation = await hdWallet.deriveNextAddress(resolvedInput.network!);
       depositAddress = derivation.address;
       derivationIndex = derivation.derivationIndex;
       hdChain = derivation.chain;
@@ -197,7 +237,7 @@ export class SessionManager {
     } else {
       // Fall back to legacy wallet pool
       const wallet = await assignWallet(
-        input.network!,
+        resolvedInput.network!,
         this.config.sessionTtlMinutes
       );
       depositAddress = wallet.address;
@@ -208,12 +248,12 @@ export class SessionManager {
     const sessionData: CreateSessionData = {
       id: ids.id,
       reference: ids.reference,
-      type: input.type,
-      fiatAmount: input.fiatAmount,
-      fiatCurrency: input.fiatCurrency,
+      type: resolvedInput.type,
+      fiatAmount: resolvedInput.fiatAmount!, // guaranteed: either fiat-first or derived from cryptoAmount reverse-calc
+      fiatCurrency: resolvedInput.fiatCurrency,
       cryptoAmount: charges.totalCryptoAmount,
-      crypto: input.crypto,
-      network: input.network,
+      crypto: resolvedInput.crypto,
+      network: resolvedInput.network,
       rate: rateLock.rate,
       assetPrice: rateLock.assetPrice,
       chargeAmount: charges.fiatCharge,
@@ -221,12 +261,12 @@ export class SessionManager {
       walletId,
       derivationIndex,
       hdChain: hdChain as any,
-      fundingWalletIndex: input.fundingWalletIndex,
-      parentWallet: input.parentWallet,
-      merchantId: input.merchantId,
-      apiKeyId: input.apiKeyId,
+      fundingWalletIndex: resolvedInput.fundingWalletIndex,
+      parentWallet: resolvedInput.parentWallet,
+      merchantId: resolvedInput.merchantId,
+      apiKeyId: resolvedInput.apiKeyId,
       expiresAt,
-      metadata: input.metadata,
+      metadata: resolvedInput.metadata,
     };
 
     const session = await this.repository.create(sessionData);

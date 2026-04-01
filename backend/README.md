@@ -16,112 +16,200 @@ The payment engine supports three core transaction types:
 
 ### Transfer (Direct Payment)
 
-User provides bank details and pays crypto in one flow:
+A transfer delivers fiat to a receiver's bank account in exchange for crypto. The flow has three steps: find the bank, verify the account, then create the payment.
 
-```typescript
-import { PaymentEngine } from '@/services/payment-engine';
+**Base URL:** `https://api.2settle.io/v1`
 
-const session = await PaymentEngine.createPayment({
-  type: 'transfer',
-  fiatAmount: 50000,        // ₦50,000
-  fiatCurrency: 'NGN',
-  crypto: 'USDT',
-  network: 'bep20',
-  payer: {
-    chatId: 'user_123',
-    phone: '08012345678'
-  },
-  receiver: {
-    bankCode: '058',
-    accountNumber: '1234567890',
-    accountName: 'John Doe'
-  }
-});
+#### Step 1 — Find the bank code
 
-console.log(session.depositAddress);  // Where user sends crypto
-console.log(session.cryptoAmount);    // How much to send
-console.log(session.reference);       // Human-readable reference (2S-XXXXXX)
+```http
+GET /v1/banks/list?name=mon
 ```
+
+```json
+{
+  "message": [
+    "1. MONEYTRUST MFB 090129",
+    "2. MONIEPOINT MICROFINANCE BANK 090405",
+    "3. Monarch Microfinance Bank 090462",
+    "4. Money Master PSB 120005"
+  ]
+}
+```
+
+Pick the right bank from the list and note the code at the end (e.g. `090405` for Moniepoint).
+
+#### Step 2 — Verify the receiver's account
+
+Resolve the account number and show the name to the user for confirmation before creating the payment. No session is created yet.
+
+```http
+POST /v1/payments/verify-receiver
+Content-Type: application/json
+
+{
+  "bankCode": "090405",
+  "accountNumber": "8012345678"
+}
+```
+
+```json
+{
+  "success": true,
+  "receiver": {
+    "accountName": "JOHN DOE",
+    "accountNumber": "8012345678",
+    "bankName": "MONIEPOINT MICROFINANCE BANK",
+    "bankCode": "090405"
+  }
+}
+```
+
+Show `accountName` and `bankName` to the user for confirmation before proceeding. Do **not** send `accountName` back to the server — it is always resolved server-side.
+
+#### Step 3 — Create the payment
+
+Pass `bankCode` and `accountNumber` only. The server re-resolves account details via NUBAN.
+
+**Fiat-first** (deliver a specific NGN amount):
+
+```http
+POST /v1/payments
+X-API-Key: pk_xxxxx
+X-Timestamp: <unix ms>
+X-Signature: <hmac>
+Content-Type: application/json
+
+{
+  "type": "transfer",
+  "fiatAmount": 50000,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "payer": {
+    "chatId": "7389201648"
+  },
+  "receiver": {
+    "bankCode": "090405",
+    "accountNumber": "8012345678"
+  }
+}
+```
+
+```json
+{
+  "success": true,
+  "payment": {
+    "id": 17,
+    "reference": "2S-K4M9PX",
+    "type": "transfer",
+    "status": "pending",
+    "depositAddress": "TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop",
+    "cryptoAmount": 31.2658,
+    "crypto": "USDT",
+    "network": "trc20",
+    "fiatAmount": 50000,
+    "fiatCurrency": "NGN",
+    "rate": 1620.5,
+    "chargeAmount": 500,
+    "expiresAt": "2026-04-01T13:30:00.000Z"
+  }
+}
+```
+
+**Crypto-first** (payer sends a fixed crypto amount, engine calculates fiat after fees):
+
+```http
+POST /v1/payments
+X-API-Key: pk_xxxxx
+X-Timestamp: <unix ms>
+X-Signature: <hmac>
+Content-Type: application/json
+
+{
+  "type": "transfer",
+  "cryptoAmount": 31.2658,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "payer": {
+    "chatId": "7389201648"
+  },
+  "receiver": {
+    "bankCode": "090405",
+    "accountNumber": "8012345678"
+  }
+}
+```
+
+```json
+{
+  "success": true,
+  "payment": {
+    "id": 18,
+    "reference": "2S-R7NW2Q",
+    "type": "transfer",
+    "status": "pending",
+    "depositAddress": "TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop",
+    "cryptoAmount": 31.2658,
+    "crypto": "USDT",
+    "network": "trc20",
+    "fiatAmount": 49500,
+    "fiatCurrency": "NGN",
+    "rate": 1620.5,
+    "chargeAmount": 500,
+    "expiresAt": "2026-04-01T13:30:00.000Z"
+  }
+}
+```
+
+#### Step 4 — Payer sends crypto
+
+Show `depositAddress` and `cryptoAmount` to the payer:
+
+> Send **31.2658 USDT (TRC20)** to `TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop`. Expires in 30 minutes.
+
+The deposit watcher detects the transaction automatically — no action needed from your side.
+
+#### Step 5 — Monitor status
+
+```http
+GET /v1/payments/2S-K4M9PX
+```
+
+```json
+{
+  "success": true,
+  "payment": {
+    "reference": "2S-K4M9PX",
+    "status": "settled",
+    "crypto": "USDT",
+    "network": "trc20",
+    "cryptoAmount": 31.2658,
+    "fiatAmount": 50000,
+    "fiatCurrency": "NGN",
+    "confirmedAt": "2026-04-01T13:12:44.000Z",
+    "settledAt": "2026-04-01T13:13:02.000Z"
+  }
+}
+```
+
+| Status | Meaning |
+|--------|---------|
+| `pending` | Deposit address assigned, waiting for crypto |
+| `confirming` | Deposit seen on-chain, accumulating confirmations |
+| `confirmed` | Fully confirmed, fiat payout starting |
+| `settling` | Fiat transfer in progress |
+| `settled` | Complete — receiver has been paid |
+| `expired` | No deposit received before the deadline |
 
 ### Gift (Two-Phase)
 
-**Phase 1: Create Gift** - Sender pays crypto, gets a gift ID:
-
-```typescript
-const gift = await PaymentEngine.createGift({
-  fiatAmount: 25000,        // ₦25,000 worth
-  fiatCurrency: 'NGN',
-  crypto: 'USDT',
-  network: 'bep20',
-  sender: {
-    chatId: 'sender_123',
-    phone: '08011111111',
-    name: 'Alice'           // Optional sender name for gift message
-  },
-  message: 'Happy Birthday!'  // Optional gift message
-});
-
-console.log(gift.depositAddress);  // Sender pays crypto here
-console.log(gift.cryptoAmount);    // Amount to send
-console.log(gift.giftId);          // Share this with recipient (e.g., GIFT-XXXXXX)
-```
-
-**Phase 2: Claim Gift** - Recipient provides bank details to receive fiat:
-
-```typescript
-const claimed = await PaymentEngine.claimGift({
-  giftId: 'GIFT-ABC123',
-  receiver: {
-    bankCode: '058',
-    accountNumber: '0987654321',
-    accountName: 'Bob Smith',
-    phone: '08022222222'
-  }
-});
-
-console.log(claimed.status);        // 'settling' - fiat payout initiated
-console.log(claimed.fiatAmount);    // ₦25,000 to be received
-```
+> Documentation coming soon.
 
 ### Request (Two-Phase)
 
-**Phase 1: Create Request** - User specifies how much fiat they want to receive:
-
-```typescript
-const request = await PaymentEngine.createRequest({
-  fiatAmount: 100000,       // ₦100,000 requested
-  fiatCurrency: 'NGN',
-  receiver: {
-    chatId: 'requester_123',
-    phone: '08033333333',
-    bankCode: '058',
-    accountNumber: '1234567890',
-    accountName: 'Charlie Brown'
-  },
-  description: 'Payment for freelance work'  // Optional
-});
-
-console.log(request.requestId);     // Share with payer (e.g., REQ-XXXXXX)
-console.log(request.fiatAmount);    // ₦100,000
-```
-
-**Phase 2: Pay Request** - Payer pays the crypto equivalent:
-
-```typescript
-const payment = await PaymentEngine.payRequest({
-  requestId: 'REQ-XYZ789',
-  crypto: 'BTC',            // Payer chooses crypto
-  network: 'bitcoin',
-  payer: {
-    chatId: 'payer_456',
-    phone: '08044444444'
-  }
-});
-
-console.log(payment.depositAddress);  // Payer sends crypto here
-console.log(payment.cryptoAmount);    // BTC equivalent of ₦100,000
-console.log(payment.status);          // 'pending' - waiting for deposit
-```
+> Documentation coming soon.
 
 ## Documentation
 

@@ -68,7 +68,9 @@ export interface ReceiverInput {
 
 export interface CreatePaymentInput {
   type: PaymentType;
-  fiatAmount: number;
+  fiatAmount?: number; // Required unless cryptoAmount is provided
+  /** When provided (and fiatAmount is absent), triggers reverse (crypto-first) calculation. Not valid for type 'request'. */
+  cryptoAmount?: number;
   fiatCurrency: FiatCurrency;
   crypto?: CryptoCurrency; // Optional for request type (provided at fulfillment)
   network?: Network; // Optional for request type (provided at fulfillment)

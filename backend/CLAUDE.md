@@ -171,10 +171,11 @@ HMAC_TIMESTAMP_TOLERANCE_MS=300000
 | GET | `/v1/rate/merchant` | Merchant rate |
 | GET | `/v1/rate/profit` | Profit rate |
 | GET | `/v1/rate/all` | All rates (current, merchant, profit) |
-| GET | `/v1/banks/list?name=` | Search banks by name |
-| POST | `/v1/banks/resolve` | Resolve bank account (NUBAN) |
+| GET | `/v1/banks/list?name=` | Search banks by name — returns bank name + CBN code |
+| POST | `/v1/banks/resolve` | Resolve bank account via NUBAN (takes `bank_code` + `account_number`) |
 | GET | `/v1/crypto/price?ticker=` | Crypto price by ticker |
 | POST | `/v1/auth/login` | Validate API key credentials |
+| POST | `/v1/payments/verify-receiver` | Verify a bank account before creating a payment — returns resolved account details |
 
 ### Payment Endpoints (HMAC Auth Required)
 
@@ -182,7 +183,7 @@ HMAC_TIMESTAMP_TOLERANCE_MS=300000
 |--------|----------|------------|-------------|
 | POST | `/v1/payments` | `payment:create` | Create payment (transfer, gift, request, merchant) |
 | GET | `/v1/payments/:reference` | Public | Get payment status |
-| POST | `/v1/payments/gifts/:reference/claim` | Public | Claim a gift (provide receiver bank details) |
+| POST | `/v1/payments/gifts/:reference/claim/confirm` | Public | Claim a gift — provide receiver bank details, triggers settlement |
 | POST | `/v1/payments/requests/:reference/fulfill` | Public | Fulfill a request (provide payer + crypto) |
 | POST | `/v1/payments/:reference/settle` | `payment:create` | Confirm self-settlement (requires `settlementToken`) |
 
@@ -416,6 +417,37 @@ created → pending → confirming → confirmed → settling → settled
 
 ### 1. Transfer Flow
 
+**Step 1 — Search for the bank**
+
+```
+GET /v1/banks/list?name=GTBank
+```
+```json
+{ "message": ["1. Guaranty Trust Bank 058"] }
+```
+
+**Step 2 — Verify the receiver account**
+
+```
+POST /v1/payments/verify-receiver
+{ "bankCode": "058", "accountNumber": "0123456789" }
+```
+```json
+{
+  "success": true,
+  "receiver": {
+    "accountName": "John Doe",
+    "accountNumber": "0123456789",
+    "bankName": "Guaranty Trust Bank",
+    "bankCode": "058"
+  }
+}
+```
+Show the user: **"Sending to John Doe — Guaranty Trust Bank. Confirm?"**
+
+**Step 3 — Create the transfer**
+
+Fiat-first (send exactly ₦10,000):
 ```json
 POST /v1/payments
 {
@@ -426,18 +458,65 @@ POST /v1/payments
   "network": "trc20",
   "payer": { "chatId": "123456789" },
   "receiver": {
-    "bankCode": "044",
-    "accountNumber": "0123456789",
-    "accountName": "John Doe"
+    "bankCode": "058",
+    "accountNumber": "0123456789"
   }
 }
 ```
 
-1. Rate locked, deposit address assigned → status: `pending`
-2. Payer sends crypto to `depositAddress`
-3. Watcher detects deposit → status: `confirming`
-4. Required confirmations reached → status: `confirmed`
-5. Settlement sends fiat → status: `settling` → `settled`
+Crypto-first (send all of 50 USDT):
+```json
+POST /v1/payments
+{
+  "type": "transfer",
+  "cryptoAmount": 50,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "payer": { "chatId": "123456789" },
+  "receiver": {
+    "bankCode": "058",
+    "accountNumber": "0123456789"
+  }
+}
+```
+
+> `accountName` and `bankName` are never sent by the client — they are resolved server-side via NUBAN every time.
+
+Response:
+```json
+{
+  "success": true,
+  "payment": {
+    "reference": "2S-XXXXXX",
+    "status": "pending",
+    "depositAddress": "TXxxxxxxxxxxxxxxxxxxxxxx",
+    "cryptoAmount": 50.0123,
+    "crypto": "USDT",
+    "network": "trc20",
+    "fiatAmount": 24750,
+    "fiatCurrency": "NGN",
+    "rate": 1650,
+    "chargeAmount": 500,
+    "expiresAt": "2026-04-01T13:30:00.000Z"
+  }
+}
+```
+
+**Step 4 — Payer sends crypto**
+
+Show the payer: *Send **50.0123 USDT (TRC20)** to `TXxxxxxxxxxxxxxxxxxxxxxx`. Expires in 30 minutes.*
+
+**Step 5 — Automatic from here**
+
+| Event | Status | Webhook |
+|---|---|---|
+| Deposit detected | `confirming` | `payment.confirming` |
+| Confirmations complete | `confirmed` | `payment.confirmed` |
+| Fiat payout initiated | `settling` | `payment.settling` |
+| Fiat payout confirmed | `settled` | `payment.settled` |
+
+Poll anytime: `GET /v1/payments/2S-XXXXXX`
 
 ### 2. Gift Flow
 
@@ -765,7 +844,21 @@ pm.request.headers.upsert({ key: 'Content-Type', value: 'application/json' });
 
 ### 6. Test Payments
 
-**Create Transfer:**
+**Step 1 — Search bank (public, no auth):**
+```
+GET {{baseUrl}}/banks/list?name=GTBank
+```
+
+**Step 2 — Verify receiver (public, no auth):**
+```json
+POST {{baseUrl}}/payments/verify-receiver
+{
+  "bankCode": "058",
+  "accountNumber": "0123456789"
+}
+```
+
+**Step 3 — Create Transfer (fiat-first):**
 ```json
 POST {{baseUrl}}/payments
 {
@@ -776,9 +869,25 @@ POST {{baseUrl}}/payments
   "network": "trc20",
   "payer": { "chatId": "123" },
   "receiver": {
-    "bankCode": "044",
-    "accountNumber": "0123456789",
-    "accountName": "John Doe"
+    "bankCode": "058",
+    "accountNumber": "0123456789"
+  }
+}
+```
+
+**Step 3 — Create Transfer (crypto-first):**
+```json
+POST {{baseUrl}}/payments
+{
+  "type": "transfer",
+  "cryptoAmount": 50,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "payer": { "chatId": "123" },
+  "receiver": {
+    "bankCode": "058",
+    "accountNumber": "0123456789"
   }
 }
 ```

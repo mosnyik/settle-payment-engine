@@ -56,22 +56,14 @@ export class ParticipantService {
     return result.insertId;
   }
 
-  /**
-   * Resolve and verify receiver bank details via NUBAN before any DB write.
-   *
-   * Takes the user-provided bank name and account number, looks up the bank
-   * code from our banks table, then calls NUBAN to get the verified account name.
-   * Falls back to our bank name if NUBAN doesn't return one.
-   *
-   * @throws if bank name not found in our DB
-   * @throws if NUBAN cannot resolve the account
-   */
-  async resolveReceiver(
-    bankName: string,
-    accountNumber: string
-  ): Promise<ResolvedAccount> {
-    return bankService.resolveReceiver(bankName, accountNumber);
-  }
+  // /**
+  //  * @deprecated — resolveReceiver() was a thin wrapper around bankService.resolveReceiver().
+  //  * All callers now use bankService.resolveAccount(bankCode, accountNumber) directly,
+  //  * since bankCode is provided upfront (from GET /banks/list or POST /verify-receiver).
+  //  */
+  // async resolveReceiver(bankName: string, accountNumber: string): Promise<ResolvedAccount> {
+  //   return bankService.resolveReceiver(bankName, accountNumber);
+  // }
 
   /**
    * Get or create a receiver record.
@@ -152,7 +144,7 @@ export class ParticipantService {
 
     return {
       id: rows[0].id,
-      bankCode: rows[0].bank_name,
+      bankCode: rows[0].bank_code,
       bankAccount: rows[0].bank_account,
       accountName: rows[0].account_name,
       phone: rows[0].phone || undefined,

@@ -282,6 +282,7 @@ export class SessionManager {
     if (watcher?.isActive() && session.depositAddress && session.network && session.crypto && session.cryptoAmount) {
       watcher.watch({
         sessionId: session.id,
+        type: session.type,
         depositAddress: session.depositAddress,
         network: session.network,
         cryptoCurrency: session.crypto,
@@ -571,6 +572,7 @@ export class SessionManager {
     if (watcher?.isActive()) {
       watcher.watch({
         sessionId: updatedSession.id,
+        type: updatedSession.type,
         depositAddress: depositAddress,
         network: network as any,
         cryptoCurrency: crypto as any,

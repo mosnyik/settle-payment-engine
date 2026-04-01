@@ -516,9 +516,9 @@ The deposit watcher detects the transaction automatically. Once confirmed, settl
 
 | Document | Description |
 |----------|-------------|
-| [Architecture](./ARCHITECTURE.md) | System diagrams, state machines, and component overview |
-| [Design](./DESIGN.md) | Merchant gateway and B2B integration design |
-| [Implementation Plan](./IMPLEMENTATION.md) | Phased development roadmap |
+| [Architecture](./backend/ARCHITECTURE.md) | System diagrams, state machines, and component overview |
+| [Design](./backend/DESIGN.md) | Merchant gateway and B2B integration design |
+| [Implementation Plan](./backend/IMPLEMENTATION.md) | Phased development roadmap |
 
 ## Features
 
@@ -556,38 +556,6 @@ The deposit watcher detects the transaction automatically. Once confirmed, settl
 │  │   Sessions   │  │   Wallets    │  │      Rates       │  │
 │  └──────────────┘  └──────────────┘  └──────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
-```
-
-## Directory Structure
-
-```
-src/services/payment-engine/
-├── index.ts                 # Public exports
-├── payment-engine.ts        # Main facade class
-├── types.ts                 # TypeScript interfaces
-├── errors.ts                # Custom error classes
-│
-├── session/
-│   ├── session-manager.ts   # Session orchestration
-│   └── session-repository.ts # Database operations
-│
-├── wallet/
-│   └── wallet-pool.ts       # Wallet assignment/release
-│
-├── rate/
-│   └── rate-service.ts      # Rate fetching & locking
-│
-├── charges/
-│   └── charge-calculator.ts # Fee calculation
-│
-├── utils/
-│   └── id-generator.ts      # Payment ID generation
-│
-└── docs/
-    ├── README.md            # This file
-    ├── ARCHITECTURE.md      # Detailed diagrams
-    ├── DESIGN.md            # Merchant gateway design
-    └── IMPLEMENTATION.md    # Development roadmap
 ```
 
 ## Payment Session Lifecycle
@@ -685,7 +653,7 @@ pnpm test                    # Run all tests
 pnpm test payment-engine     # Run payment engine tests only
 ```
 
-Tests are located in `__tests__/payment-engine/`:
+Tests are located in `backend/__tests__/payment-engine/`:
 - `id-generator.test.ts` - ID generation tests
 - `charge-calculator.test.ts` - Fee calculation tests
 - `rate-service.test.ts` - Rate locking tests

@@ -110,6 +110,7 @@ export type AmountMatchResult =
 /** Session being watched for deposits */
 export interface WatchedSession {
   id: string;
+  type: 'transfer' | 'gift' | 'request' | 'merchant';
   depositAddress: string;
   network: Network;
   chain: WatchableChain;

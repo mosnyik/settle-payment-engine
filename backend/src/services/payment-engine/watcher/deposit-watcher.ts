@@ -35,6 +35,7 @@ import * as walletService from '../../wallet-api/wallet.service';
 import { sendWebhook } from '../../wallet-api/webhook.service';
 import { getWebhookConfig } from '../../../security/services/apiKey.service';
 import { sendPaymentWebhook } from '../payment-webhook.service';
+import { settlementService } from '../settlement/settlement.service';
 
 // =============================================================================
 // TYPES
@@ -240,6 +241,7 @@ export class DepositWatcher extends EventEmitter {
    */
   watch(params: {
     sessionId: string;
+    type: 'transfer' | 'gift' | 'request' | 'merchant';
     depositAddress: string;
     network: Network;
     cryptoCurrency: CryptoCurrency;
@@ -255,6 +257,7 @@ export class DepositWatcher extends EventEmitter {
 
     const session: WatchedSession = {
       id: params.sessionId,
+      type: params.type,
       depositAddress: params.depositAddress,
       network: params.network,
       chain,
@@ -846,6 +849,14 @@ export class DepositWatcher extends EventEmitter {
               console.error(`[DepositWatcher] Sweep error for session ${session.id.slice(0, 8)}...:`, err.message);
             });
           }
+        }
+
+        // Auto-trigger settlement for transfer and request types.
+        // Gifts defer settlement until the recipient claims via POST /payments/gifts/:ref/claim/confirm.
+        if (session.type === 'transfer' || session.type === 'request') {
+          settlementService.settleSession(session.id).catch(err =>
+            console.error(`[DepositWatcher] Settlement error for session ${session.id.slice(0, 8)}...:`, err.message)
+          );
         }
 
         // Stop watching this session

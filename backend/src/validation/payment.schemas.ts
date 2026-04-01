@@ -74,6 +74,15 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
   const hasFiat = data.fiatAmount !== undefined;
   const hasCrypto = data.cryptoAmount !== undefined;
 
+  // Requests are fiat-only — cryptoAmount is never valid
+  if (data.type === 'request' && hasCrypto) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'cryptoAmount is not valid for request type — use fiatAmount instead',
+      path: ['cryptoAmount'],
+    });
+  }
+
   if (!hasFiat && !hasCrypto) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -82,15 +91,8 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
     });
   }
 
-  // Crypto-first path: fiatAmount absent, cryptoAmount present
-  if (!hasFiat && hasCrypto) {
-    if (data.type === 'request') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'cryptoAmount is not valid for request type — use fiatAmount instead',
-        path: ['cryptoAmount'],
-      });
-    }
+  // Crypto-first path: fiatAmount absent, cryptoAmount present (not applicable to requests)
+  if (!hasFiat && hasCrypto && data.type !== 'request') {
     if (!data.crypto) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -113,8 +115,8 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
     ETH: ['ethereum'],
     BNB: ['bsc'],
     TRX: ['tron'],
-    USDT: ['ethereum', 'erc20', 'bsc', 'bep20', 'tron', 'trc20'],
-    USDC: ['ethereum', 'erc20', 'bsc', 'bep20'],
+    USDT: ['erc20', 'bep20', 'trc20'],
+    USDC: ['erc20', 'bep20'],
   };
 
   // Type-specific validation

@@ -11,12 +11,14 @@ import { participantService } from '../services/payment-engine/participant';
 import { legacySyncService } from '../services/payment-engine/sync';
 import {
   createPaymentSchema,
+  verifyGiftClaimSchema,
   claimGiftSchema,
   fulfillRequestSchema,
 } from '../validation/payment.schemas';
 import { PaymentEngineError } from '../services/payment-engine/errors';
 import { requirePermission } from '../security/middleware/authenticate';
 import { settlementService } from '../services/payment-engine/settlement/settlement.service';
+import { bankService } from '../services/bank/bank.service';
 
 const router = Router();
 
@@ -60,19 +62,32 @@ router.post(
         : apiKey.parentWalletEthereum) ?? undefined;
     }
 
+    // Resolve receiver via NUBAN before creating session (if provided)
+    let resolvedReceiver: { bankCode: string; accountNumber: string; accountName: string; bankName: string } | undefined;
+    if (input.receiver) {
+      resolvedReceiver = await bankService.resolveReceiver(
+        input.receiver.bankName,
+        input.receiver.accountNumber
+      );
+    }
+
     // Create payment session via PaymentEngine
     const session = await paymentEngine.createPayment({
       type: input.type,
       fiatAmount: input.fiatAmount,
       fiatCurrency: input.fiatCurrency,
-      crypto: input.crypto as any, // Optional for request type
-      network: input.network as any, // Optional for request type
+      crypto: input.crypto as any,
+      network: input.network as any,
       payer: input.payer ? {
         chatId: input.payer.chatId,
         phone: input.payer.phone,
         walletAddress: input.payer.walletAddress,
-      } : undefined, // Type-specific validation happens in session manager
-      receiver: input.receiver,
+      } : undefined,
+      receiver: resolvedReceiver ? {
+        bankCode: resolvedReceiver.bankCode,
+        accountNumber: resolvedReceiver.accountNumber,
+        accountName: resolvedReceiver.accountName,
+      } : undefined,
       merchantId: input.merchantId,
       merchantReference: input.merchantReference,
       callbackUrl: input.callbackUrl,
@@ -88,8 +103,12 @@ router.post(
       await paymentEngine.setPayerId(session.id, payerId);
     }
 
-    if (input.receiver) {
-      const receiverId = await participantService.getOrCreateReceiver(input.receiver);
+    if (resolvedReceiver) {
+      const receiverId = await participantService.getOrCreateReceiver({
+        bankCode: resolvedReceiver.bankCode,
+        accountNumber: resolvedReceiver.accountNumber,
+        accountName: resolvedReceiver.accountName,
+      } as any);
       await paymentEngine.setReceiverId(session.id, receiverId);
     }
 
@@ -187,29 +206,90 @@ router.get(
 });
 
 // =============================================================================
-// CLAIM GIFT
+// CLAIM GIFT — STEP 1: VERIFY
 // =============================================================================
 
 /**
- * POST /payments/gifts/:reference/claim
+ * POST /payments/gifts/:reference/claim/verify
  *
- * Claim a gift by providing receiver (bank) details.
- * Only works for gift-type payments that don't have a receiver yet.
+ * Step 1 of gift claim. Validates the gift and resolves the recipient's
+ * bank details via NUBAN. Returns verified account info for the user to confirm.
+ * Does NOT create the receiver or trigger settlement yet.
  */
 router.post(
-  '/gifts/:reference/claim',
+  '/gifts/:reference/claim/verify',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { reference } = req.params;
 
-      if (!reference) {
+      const parsed = verifyGiftClaimSchema.safeParse(req.body);
+      if (!parsed.success) {
         return res.status(400).json({
           success: false,
-          error: 'Reference is required',
+          error: 'Validation failed',
+          details: parsed.error.flatten(),
         });
       }
 
-      // Validate input
+      // Validate the gift
+      const session = await paymentEngine.getPaymentByReference(reference);
+
+      if (session.type !== 'gift') {
+        return res.status(400).json({ success: false, error: 'Payment is not a gift' });
+      }
+
+      if (session.status !== 'confirmed') {
+        return res.status(400).json({ success: false, error: 'Gift has not been paid yet' });
+      }
+
+      if (session.receiverId) {
+        return res.status(400).json({ success: false, error: 'Gift has already been claimed' });
+      }
+
+      // Resolve bank details via NUBAN — bank name from our DB as fallback
+      const resolved = await bankService.resolveReceiver(
+        parsed.data.bankName,
+        parsed.data.accountNumber
+      );
+
+      return res.json({
+        success: true,
+        message: 'Please confirm your bank details',
+        receiver: {
+          accountName: resolved.accountName,
+          accountNumber: resolved.accountNumber,
+          bankName: resolved.bankName,
+          bankCode: resolved.bankCode,
+        },
+      });
+    } catch (err: any) {
+      if (err instanceof PaymentEngineError) {
+        return res.status(err.statusCode).json({ success: false, error: err.message, code: err.code });
+      }
+      if (err.message?.includes('Bank not found') || err.message?.includes('Account not found')) {
+        return res.status(400).json({ success: false, error: err.message });
+      }
+      next(err);
+    }
+  }
+);
+
+// =============================================================================
+// CLAIM GIFT — STEP 2: CONFIRM
+// =============================================================================
+
+/**
+ * POST /payments/gifts/:reference/claim/confirm
+ *
+ * Step 2 of gift claim. Re-resolves bank details via NUBAN (source of truth),
+ * creates the receiver record, links to the session, and triggers settlement.
+ */
+router.post(
+  '/gifts/:reference/claim/confirm',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { reference } = req.params;
+
       const parsed = claimGiftSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({
@@ -219,28 +299,40 @@ router.post(
         });
       }
 
-      // Get session
+      // Re-validate the gift (guard against race conditions)
       const session = await paymentEngine.getPaymentByReference(reference);
 
-      // Validate it's a gift
       if (session.type !== 'gift') {
-        return res.status(400).json({
-          success: false,
-          error: 'Payment is not a gift',
-        });
+        return res.status(400).json({ success: false, error: 'Payment is not a gift' });
       }
 
-      // Check if already claimed
+      if (session.status !== 'confirmed') {
+        return res.status(400).json({ success: false, error: 'Gift has not been paid yet' });
+      }
+
       if (session.receiverId) {
-        return res.status(400).json({
-          success: false,
-          error: 'Gift has already been claimed',
-        });
+        return res.status(400).json({ success: false, error: 'Gift has already been claimed' });
       }
 
-      // Create/get receiver and link to session
-      const receiverId = await participantService.getOrCreateReceiver(parsed.data.receiver);
+      // Re-resolve via NUBAN — accountName always comes from here, never from client
+      const resolved = await bankService.resolveReceiver(
+        parsed.data.bankName,
+        parsed.data.accountNumber
+      );
+
+      // Create/get receiver using NUBAN-verified details and link to session
+      const receiverId = await participantService.getOrCreateReceiver({
+        bankCode: resolved.bankCode,
+        accountNumber: resolved.accountNumber,
+        accountName: resolved.accountName,
+        bankName: resolved.bankName,
+      } as any);
       await paymentEngine.setReceiverId(session.id, receiverId);
+
+      // Trigger settlement using the creator's API key settlement mode
+      settlementService.settleSession(session.id).catch(err =>
+        console.error(`[ClaimGift] Settlement error for ${reference}:`, err)
+      );
 
       // Sync to legacy
       const updatedSession = await paymentEngine.getPayment(session.id);
@@ -248,21 +340,24 @@ router.post(
 
       return res.json({
         success: true,
-        message: 'Gift claimed successfully',
+        message: 'Gift claimed successfully. Payout is being processed.',
         payment: {
           id: updatedSession.id,
           reference: updatedSession.reference,
           status: updatedSession.status,
-          receiverId: updatedSession.receiverId,
+          receiver: {
+            accountName: resolved.accountName,
+            accountNumber: resolved.accountNumber,
+            bankName: resolved.bankName,
+          },
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       if (err instanceof PaymentEngineError) {
-        return res.status(err.statusCode).json({
-          success: false,
-          error: err.message,
-          code: err.code,
-        });
+        return res.status(err.statusCode).json({ success: false, error: err.message, code: err.code });
+      }
+      if (err.message?.includes('Bank not found') || err.message?.includes('Account not found')) {
+        return res.status(400).json({ success: false, error: err.message });
       }
       next(err);
     }

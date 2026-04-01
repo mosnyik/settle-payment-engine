@@ -618,7 +618,7 @@ export class SettlementService {
     if (!receiverId) return null;
 
     const [rows] = await pool.execute<ReceiverRow[]>(
-      `SELECT id, bank_code, account_number, account_name, bank_name, paystack_recipient_code
+      `SELECT id, bank_code, bank_account AS account_number, account_name, bank_name, paystack_recipient_code
        FROM receivers WHERE id = ?`,
       [receiverId]
     );

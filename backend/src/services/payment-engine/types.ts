@@ -62,6 +62,7 @@ export interface ReceiverInput {
   bankCode: string;
   accountNumber: string;
   accountName: string;
+  bankName?: string;
   phone?: string;
 }
 

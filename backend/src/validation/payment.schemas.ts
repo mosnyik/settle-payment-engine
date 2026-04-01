@@ -37,11 +37,14 @@ export const payerInputSchema = z.object({
   walletAddress: z.string().optional(),
 });
 
-/** Receiver input schema */
+/**
+ * Receiver input schema.
+ * Client provides bank name (human-readable) and account number only.
+ * Bank code and account name are resolved internally via NUBAN — never trusted from client.
+ */
 export const receiverInputSchema = z.object({
-  bankCode: z.string().min(1, 'Bank code is required'),
+  bankName: z.string().min(1, 'Bank name is required'),
   accountNumber: z.string().min(1, 'Account number is required'),
-  accountName: z.string().min(1, 'Account name is required'),
   phone: z.string().optional(),
 });
 
@@ -167,12 +170,19 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
 });
 
 // =============================================================================
-// GIFT CLAIM SCHEMA
+// GIFT CLAIM SCHEMAS
 // =============================================================================
 
-/** Schema for claiming a gift (setting receiver) */
+/** Step 1: Verify receiver bank details (returns resolved account for confirmation) */
+export const verifyGiftClaimSchema = z.object({
+  bankName: z.string().min(1, 'Bank name is required'),
+  accountNumber: z.string().min(1, 'Account number is required'),
+});
+
+/** Step 2: Confirm and trigger settlement (same input — backend re-resolves via NUBAN) */
 export const claimGiftSchema = z.object({
-  receiver: receiverInputSchema,
+  bankName: z.string().min(1, 'Bank name is required'),
+  accountNumber: z.string().min(1, 'Account number is required'),
 });
 
 // =============================================================================
@@ -227,5 +237,6 @@ export const paymentIdSchema = z.object({
 export type CreatePaymentInput = z.infer<typeof createPaymentSchema>;
 export type PayerInput = z.infer<typeof payerInputSchema>;
 export type ReceiverInput = z.infer<typeof receiverInputSchema>;
+export type VerifyGiftClaimInput = z.infer<typeof verifyGiftClaimSchema>;
 export type ClaimGiftInput = z.infer<typeof claimGiftSchema>;
 export type FulfillRequestInput = z.infer<typeof fulfillRequestSchema>;

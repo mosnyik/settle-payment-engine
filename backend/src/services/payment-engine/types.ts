@@ -82,6 +82,12 @@ export interface CreatePaymentInput {
   metadata?: Record<string, unknown>;
   /** Bank's own internal transaction reference (bank_confirmation type only) */
   bankRef?: string;
+  /**
+   * Transfer only. Controls which side bears the platform fee.
+   * 'fiat'   — charge deducted from fiat payout; receiver gets fiatAmount - charge.
+   * 'crypto' — charge added to crypto; receiver gets full fiatAmount.
+   */
+  chargeFrom?: 'fiat' | 'crypto';
   // Populated from API key at request time
   apiKeyId?: number;
   fundingWalletIndex?: number;
@@ -111,6 +117,8 @@ export interface PaymentSession {
   status: PaymentStatus;
   fiatAmount: number;
   fiatCurrency: FiatCurrency;
+  /** USD value of the transaction at rate-lock time (netFiatAmount / rate). Persisted for analytics. */
+  transactionUsd?: number;
   cryptoAmount?: number; // Optional for request type (set at fulfillment)
   crypto?: CryptoCurrency; // Optional for request type (set at fulfillment)
   network?: Network; // Optional for request type (set at fulfillment)

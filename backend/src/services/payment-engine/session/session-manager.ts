@@ -220,7 +220,9 @@ export class SessionManager {
     const charges = calculateCharges(
       resolvedInput.fiatAmount!,
       resolvedInput.crypto!,
-      rateLock
+      rateLock,
+      undefined,
+      resolvedInput.chargeFrom ?? 'crypto'
     );
 
     // Try HD wallet first, fall back to legacy wallet pool
@@ -253,8 +255,9 @@ export class SessionManager {
       id: ids.id,
       reference: ids.reference,
       type: resolvedInput.type,
-      fiatAmount: resolvedInput.fiatAmount!, // guaranteed: either fiat-first or derived from cryptoAmount reverse-calc
+      fiatAmount: charges.netFiatAmount,
       fiatCurrency: resolvedInput.fiatCurrency,
+      transactionUsd: rateLock.rate ? charges.netFiatAmount / rateLock.rate : undefined,
       cryptoAmount: charges.totalCryptoAmount,
       crypto: resolvedInput.crypto,
       network: resolvedInput.network,
@@ -561,6 +564,7 @@ export class SessionManager {
       rate: rateLock.rate,
       assetPrice: rateLock.assetPrice,
       chargeAmount: charges.fiatCharge,
+      transactionUsd: rateLock.rate ? charges.netFiatAmount / rateLock.rate : undefined,
       depositAddress,
       walletId,
       derivationIndex,

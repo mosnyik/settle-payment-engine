@@ -19,6 +19,7 @@ export interface CreateSessionData {
   type: PaymentType;
   fiatAmount: number;
   fiatCurrency: FiatCurrency;
+  transactionUsd?: number;
   cryptoAmount?: number; // Optional for request type (set at fulfillment)
   crypto?: CryptoCurrency; // Optional for request type (set at fulfillment)
   network?: Network; // Optional for request type (set at fulfillment)
@@ -52,6 +53,7 @@ export interface UpdateSessionData {
   cashbackAmount?: number;
   cashbackCredited?: boolean;
   // Fields for request fulfillment
+  transactionUsd?: number;
   crypto?: CryptoCurrency;
   network?: Network;
   cryptoAmount?: number;
@@ -73,6 +75,7 @@ function rowToSession(row: any): PaymentSession {
     status: row.status as PaymentStatus,
     fiatAmount: Number(row.fiat_amount),
     fiatCurrency: row.fiat_currency as FiatCurrency,
+    transactionUsd: row.transaction_usd != null ? Number(row.transaction_usd) : undefined,
     cryptoAmount: Number(row.crypto_amount),
     crypto: row.crypto as CryptoCurrency,
     network: row.network as Network,
@@ -110,14 +113,14 @@ export class SessionRepository {
       await pool.query(
         `INSERT INTO payment_sessions (
           id, reference, type, status,
-          fiat_amount, fiat_currency, crypto_amount, crypto, network,
+          fiat_amount, fiat_currency, transaction_usd, crypto_amount, crypto, network,
           rate, asset_price, charge_amount,
           deposit_address, wallet_id, derivation_index, hd_chain,
           funding_wallet_index, parent_wallet,
           payer_id, receiver_id, merchant_id, api_key_id,
           expires_at, created_at, updated_at,
           metadata, bank_ref
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.id,
           data.reference,
@@ -125,6 +128,7 @@ export class SessionRepository {
           data.depositAddress ? 'pending' : 'created',
           data.fiatAmount,
           data.fiatCurrency,
+          data.transactionUsd ?? null,
           data.cryptoAmount ?? null,
           data.crypto ?? null,
           data.network ?? null,
@@ -277,6 +281,10 @@ export class SessionRepository {
     if (data.cashbackCredited !== undefined) {
       updates.push('cashback_credited = ?');
       values.push(data.cashbackCredited ? 1 : 0);
+    }
+    if (data.transactionUsd !== undefined) {
+      updates.push('transaction_usd = ?');
+      values.push(data.transactionUsd);
     }
     // Request fulfillment fields
     if (data.crypto !== undefined) {

@@ -97,6 +97,7 @@ router.post(
       callbackUrl: input.callbackUrl,
       metadata: input.metadata,
       bankRef: input.bankRef,
+      chargeFrom: input.chargeFrom,
       apiKeyId: apiKey?.id,
       fundingWalletIndex: apiKey?.fundingWalletIndex ?? undefined,
       parentWallet,
@@ -123,6 +124,20 @@ router.post(
     const updatedSession = await paymentEngine.getPayment(session.id);
     await legacySyncService.syncToLegacy(updatedSession);
 
+    // Build charge + transaction value breakdown for response
+    const rate = updatedSession.rate;
+    const assetPrice = updatedSession.assetPrice ?? 1;
+    const chargeBreakdown = updatedSession.chargeAmount != null && rate
+      ? {
+          fiat: updatedSession.chargeAmount,
+          crypto: updatedSession.crypto === 'USDT'
+            ? updatedSession.chargeAmount / rate
+            : updatedSession.chargeAmount / rate / assetPrice,
+          usd: updatedSession.chargeAmount / rate,
+        }
+      : null;
+    const transactionUsd = updatedSession.transactionUsd ?? null;
+
     return res.status(201).json({
       success: true,
       payment: {
@@ -136,8 +151,9 @@ router.post(
         network: updatedSession.network,
         fiatAmount: updatedSession.fiatAmount,
         fiatCurrency: updatedSession.fiatCurrency,
+        transactionUsd,
         rate: updatedSession.rate,
-        chargeAmount: updatedSession.chargeAmount,
+        charge: chargeBreakdown,
         expiresAt: updatedSession.expiresAt,
       },
     });
@@ -435,6 +451,18 @@ router.post(
       const updatedSession = await paymentEngine.getPayment(fulfilledSession.id);
       await legacySyncService.syncToLegacy(updatedSession);
 
+      const fulfillRate = updatedSession.rate;
+      const fulfillAssetPrice = updatedSession.assetPrice ?? 1;
+      const fulfillChargeBreakdown = updatedSession.chargeAmount != null && fulfillRate
+        ? {
+            fiat: updatedSession.chargeAmount,
+            crypto: updatedSession.crypto === 'USDT'
+              ? updatedSession.chargeAmount / fulfillRate
+              : updatedSession.chargeAmount / fulfillRate / fulfillAssetPrice,
+            usd: updatedSession.chargeAmount / fulfillRate,
+          }
+        : null;
+
       return res.json({
         success: true,
         message: 'Request fulfilled successfully',
@@ -446,12 +474,12 @@ router.post(
           cryptoAmount: updatedSession.cryptoAmount,
           crypto: updatedSession.crypto,
           network: updatedSession.network,
-          rate: updatedSession.rate,
-          chargeAmount: updatedSession.chargeAmount,
           fiatAmount: updatedSession.fiatAmount,
           fiatCurrency: updatedSession.fiatCurrency,
+          transactionUsd: updatedSession.transactionUsd ?? null,
+          rate: updatedSession.rate,
+          charge: fulfillChargeBreakdown,
           expiresAt: updatedSession.expiresAt,
-          payerId: updatedSession.payerId,
         },
       });
     } catch (err) {

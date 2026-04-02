@@ -1,6 +1,6 @@
 # Payment Engine - Getting Started Guide
 
-A crypto-to-fiat payment processing API supporting transfers, gifts, payment requests, and merchant payments with automatic settlement.
+A crypto-to-fiat payment processing API supporting transfers, gifts, payment requests, merchant payments, and bank confirmation rails with automatic settlement.
 
 ## Table of Contents
 
@@ -25,10 +25,13 @@ A crypto-to-fiat payment processing API supporting transfers, gifts, payment req
 The Payment Engine enables crypto-to-fiat payments. Users pay in cryptocurrency, and recipients receive local currency (fiat) directly to their bank accounts.
 
 **Key Features:**
-- **Multiple Payment Types** - Transfers, gifts, payment requests, merchant checkout
+- **Five Payment Types** - Transfer, Gift, Request, Merchant, Bank Confirmation
+- **Flexible Fee Charging** - `chargeFrom: fiat` or `chargeFrom: crypto` per transfer
 - **Multi-Crypto Support** - BTC, ETH, BNB, TRX, USDT, USDC
 - **Automatic Monitoring** - Blockchain watchers detect and confirm deposits
-- **Instant Settlement** - Fiat payouts to bank accounts upon confirmation
+- **Instant Settlement** - Fiat payouts via Paystack (default), Mongoro, or self-settlement
+- **Per-Key Confirmation Thresholds** - Override required confirmations per chain
+- **Volume Analytics** - `transactionUsd` tracked on every session
 - **HD Wallet Technology** - Unique deposit address for each payment
 
 ### Supported Currencies
@@ -135,12 +138,11 @@ curl -X POST https://api.2settle.io/v1/payments \
     "crypto": "USDT",
     "network": "trc20",
     "payer": {
-      "chatId": "user_123"
+      "chatId": "7389201648"
     },
     "receiver": {
-      "bankCode": "044",
-      "accountNumber": "0123456789",
-      "accountName": "John Doe"
+      "bankCode": "090405",
+      "accountNumber": "8012345678"
     }
   }'
 ```
@@ -150,18 +152,22 @@ Response:
 {
   "success": true,
   "payment": {
-    "id": "pay_abc123xyz",
     "reference": "2S-A1B2C3",
     "type": "transfer",
     "status": "pending",
     "depositAddress": "TXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "cryptoAmount": 6.95,
+    "cryptoAmount": 6.6038,
     "crypto": "USDT",
     "network": "trc20",
-    "fiatAmount": 10000,
+    "fiatAmount": 9500,
     "fiatCurrency": "NGN",
+    "transactionUsd": 6.60,
     "rate": 1439.00,
-    "chargeAmount": 500,
+    "charge": {
+      "fiat": 500,
+      "crypto": 0.3474,
+      "usd": 0.35
+    },
     "expiresAt": "2024-03-03T11:00:00.000Z"
   }
 }
@@ -248,9 +254,10 @@ const { timestamp, signature, bodyStr } = signRequest(
 | Type | Payer | Receiver | Use Case |
 |------|-------|----------|----------|
 | `transfer` | Required | Required | Direct crypto-to-bank payment |
-| `gift` | Required | Optional (claim later) | Send crypto gift to anyone |
-| `request` | Optional (fulfill later) | Required | Invoice/payment request |
+| `gift` | Required | Not allowed (set at claim) | Send crypto gift to anyone |
+| `request` | Not allowed (set at fulfill) | Required | Invoice/payment request |
 | `merchant` | Optional | Optional | E-commerce checkout |
+| `bank_confirmation` | Not required | Not required | Bank-managed crypto confirmation rail |
 
 ### Transfer
 
@@ -262,11 +269,12 @@ Payer ──[Crypto]──> Payment Engine ──[Fiat]──> Receiver's Bank
 
 **Required Fields:**
 - `payer.chatId` - Identifier for the person paying
-- `receiver.bankCode`, `receiver.accountNumber`, `receiver.accountName` - Bank details
+- `receiver.bankCode`, `receiver.accountNumber` - Bank details (name resolved server-side)
+- `chargeFrom` - `"fiat"` (fee from payout) or `"crypto"` (fee added to crypto)
 
 ### Gift
 
-Sender pays crypto, receiver claims later with their bank details.
+Sender pays crypto upfront; receiver claims later with their bank details. Fee always charged from crypto.
 
 ```
 1. Sender creates gift ──> Gets reference code
@@ -278,13 +286,14 @@ Sender pays crypto, receiver claims later with their bank details.
 
 **Required Fields (Creation):**
 - `payer.chatId` - Gift sender's identifier
+- No `receiver` at creation
 
-**Required Fields (Claim):**
-- `receiver.bankCode`, `receiver.accountNumber`, `receiver.accountName`
+**Required Fields (Claim — POST /v1/payments/gifts/:reference/claim/confirm):**
+- `receiver.bankCode`, `receiver.accountNumber`
 
 ### Request
 
-Receiver creates a payment request, payer fulfills later.
+Receiver creates a payment request, payer fulfills later. Fee always charged from crypto.
 
 ```
 1. Receiver creates request ──> Gets reference code (no crypto specified yet)
@@ -295,9 +304,10 @@ Receiver creates a payment request, payer fulfills later.
 ```
 
 **Required Fields (Creation):**
-- `receiver.bankCode`, `receiver.accountNumber`, `receiver.accountName`
+- `receiver.bankCode`, `receiver.accountNumber`
 - `fiatAmount`, `fiatCurrency`
 - Crypto/network are **optional** at creation (can be set at fulfillment)
+- No `payer` at creation
 
 **Required Fields (Fulfill):**
 - `payer.chatId`
@@ -306,6 +316,14 @@ Receiver creates a payment request, payer fulfills later.
 ### Merchant
 
 E-commerce checkout flow (customizable).
+
+### Bank Confirmation
+
+For banks that manage their own users and fiat disbursement. The engine confirms the crypto deposit; the bank sends fiat and calls `/settle` with the one-time token from the webhook.
+
+**Required Fields:**
+- `fiatAmount`, `fiatCurrency`, `crypto`, `network`
+- `bankRef` (optional) - Bank's internal transaction reference for reconciliation
 
 ---
 
@@ -343,18 +361,20 @@ POST /v1/payments
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `type` | string | Yes | `transfer`, `gift`, `request`, or `merchant` |
-| `fiatAmount` | number | Yes | Amount in fiat currency |
+| `type` | string | Yes | `transfer`, `gift`, `request`, `merchant`, or `bank_confirmation` |
+| `fiatAmount` | number | Conditional | Amount in fiat currency (required unless `cryptoAmount` provided) |
+| `cryptoAmount` | number | Conditional | Crypto amount for crypto-first mode (not valid for `request`) |
 | `fiatCurrency` | string | Yes | `NGN`, `GHS`, `KES`, `ZAR` |
-| `crypto` | string | Conditional | Required for transfer/gift; optional for request |
-| `network` | string | Conditional | Required for transfer/gift; optional for request |
-| `payer` | object | Conditional | Required for transfer/gift |
+| `crypto` | string | Conditional | Required for transfer/gift/merchant/bank_confirmation; optional for request |
+| `network` | string | Conditional | Required for transfer/gift/merchant/bank_confirmation; optional for request |
+| `chargeFrom` | string | Required for transfer | `"fiat"` — fee from payout; `"crypto"` — fee added to crypto |
+| `payer` | object | Conditional | Required for transfer/gift; not allowed for request |
 | `payer.chatId` | string | Yes (if payer) | Payer identifier |
 | `payer.phone` | string | No | Payer phone number |
-| `receiver` | object | Conditional | Required for transfer/request |
+| `receiver` | object | Conditional | Required for transfer/request; not allowed for gift/bank_confirmation |
 | `receiver.bankCode` | string | Yes (if receiver) | Bank code |
 | `receiver.accountNumber` | string | Yes (if receiver) | Account number |
-| `receiver.accountName` | string | Yes (if receiver) | Account holder name |
+| `bankRef` | string | No | Bank's internal reference (bank_confirmation type only) |
 | `metadata` | object | No | Custom data for your reference |
 | `callbackUrl` | string | No | URL for status callbacks |
 
@@ -368,13 +388,13 @@ POST /v1/payments
   "fiatCurrency": "NGN",
   "crypto": "USDT",
   "network": "trc20",
+  "chargeFrom": "fiat",
   "payer": {
-    "chatId": "telegram_123456"
+    "chatId": "7389201648"
   },
   "receiver": {
-    "bankCode": "044",
-    "accountNumber": "0123456789",
-    "accountName": "John Doe"
+    "bankCode": "090405",
+    "accountNumber": "8012345678"
   },
   "metadata": {
     "orderId": "ORD-001",
@@ -388,18 +408,22 @@ POST /v1/payments
 {
   "success": true,
   "payment": {
-    "id": "pay_r7CNReshKvFlKaec",
     "reference": "2S-7N4VFR",
     "type": "transfer",
     "status": "pending",
     "depositAddress": "TDrhiGeJ11zNStTLhcJt4CvqSwyUVbHPZR",
-    "cryptoAmount": 6.95,
+    "cryptoAmount": 6.6038,
     "crypto": "USDT",
     "network": "trc20",
-    "fiatAmount": 10000,
+    "fiatAmount": 9500,
     "fiatCurrency": "NGN",
+    "transactionUsd": 6.60,
     "rate": 1439.00,
-    "chargeAmount": 500,
+    "charge": {
+      "fiat": 500,
+      "crypto": 0.3474,
+      "usd": 0.35
+    },
     "expiresAt": "2024-03-03T11:00:00.000Z"
   }
 }
@@ -416,7 +440,7 @@ POST /v1/payments
   "crypto": "BTC",
   "network": "bitcoin",
   "payer": {
-    "chatId": "sender_456"
+    "chatId": "7389201648"
   },
   "metadata": {
     "message": "Happy Birthday!"
@@ -429,17 +453,23 @@ POST /v1/payments
 {
   "success": true,
   "payment": {
-    "id": "pay_giftXYZ123",
     "reference": "2S-GIFT01",
     "type": "gift",
     "status": "pending",
     "depositAddress": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
-    "cryptoAmount": 0.00012,
+    "cryptoAmount": 0.0000328,
     "crypto": "BTC",
     "network": "bitcoin",
     "fiatAmount": 5000,
     "fiatCurrency": "NGN",
-    "rate": 41666666.67
+    "transactionUsd": 3.09,
+    "rate": 1620.5,
+    "charge": {
+      "fiat": 0,
+      "crypto": 0.00000033,
+      "usd": 0.05
+    },
+    "expiresAt": "2024-03-03T14:00:00.000Z"
   }
 }
 ```
@@ -455,9 +485,8 @@ POST /v1/payments
   "fiatAmount": 25000,
   "fiatCurrency": "NGN",
   "receiver": {
-    "bankCode": "058",
-    "accountNumber": "1234567890",
-    "accountName": "Jane Smith"
+    "bankCode": "044",
+    "accountNumber": "0012345678"
   },
   "metadata": {
     "invoiceId": "INV-2024-001"
@@ -504,21 +533,25 @@ GET /v1/payments/2S-7N4VFR
 {
   "success": true,
   "payment": {
-    "id": "pay_r7CNReshKvFlKaec",
     "reference": "2S-7N4VFR",
     "type": "transfer",
     "status": "confirmed",
     "depositAddress": "TDrhiGeJ11zNStTLhcJt4CvqSwyUVbHPZR",
-    "cryptoAmount": 6.95,
+    "cryptoAmount": 6.6038,
     "crypto": "USDT",
     "network": "trc20",
-    "fiatAmount": 10000,
+    "fiatAmount": 9500,
     "fiatCurrency": "NGN",
+    "transactionUsd": 6.60,
     "rate": 1439.00,
-    "chargeAmount": 500,
+    "charge": {
+      "fiat": 500,
+      "crypto": 0.3474,
+      "usd": 0.35
+    },
     "txHash": "abc123def456...",
     "confirmations": 19,
-    "receivedAmount": 6.95,
+    "receivedAmount": 6.6038,
     "expiresAt": "2024-03-03T11:00:00.000Z",
     "confirmedAt": "2024-03-03T10:15:00.000Z",
     "settledAt": null
@@ -530,10 +563,10 @@ GET /v1/payments/2S-7N4VFR
 
 ### Claim Gift
 
-Claim a gift by providing receiver bank details.
+Claim a gift by providing receiver bank details. Account name is resolved server-side via NUBAN — never send it from the client.
 
 ```
-POST /v1/payments/gifts/:reference/claim
+POST /v1/payments/gifts/:reference/claim/confirm
 ```
 
 **No special permission required** (gift recipient doesn't need API key)
@@ -544,16 +577,14 @@ POST /v1/payments/gifts/:reference/claim
 |-------|------|----------|-------------|
 | `receiver.bankCode` | string | Yes | Bank code |
 | `receiver.accountNumber` | string | Yes | Account number |
-| `receiver.accountName` | string | Yes | Account holder name |
 
 **Example Request:**
 ```json
-POST /v1/payments/gifts/2S-GIFT01/claim
+POST /v1/payments/gifts/2S-GIFT01/claim/confirm
 {
   "receiver": {
-    "bankCode": "044",
-    "accountNumber": "9876543210",
-    "accountName": "Gift Recipient"
+    "bankCode": "090405",
+    "accountNumber": "8012345678"
   }
 }
 ```
@@ -562,12 +593,15 @@ POST /v1/payments/gifts/2S-GIFT01/claim
 ```json
 {
   "success": true,
-  "message": "Gift claimed successfully",
+  "message": "Gift claimed successfully. Payout is being processed.",
   "payment": {
-    "id": "pay_giftXYZ123",
     "reference": "2S-GIFT01",
-    "status": "confirmed",
-    "receiverId": 42
+    "status": "settling",
+    "receiver": {
+      "accountName": "JOHN DOE",
+      "accountNumber": "8012345678",
+      "bankName": "MONIEPOINT MICROFINANCE BANK"
+    }
   }
 }
 ```
@@ -602,7 +636,7 @@ POST /v1/payments/requests/:reference/fulfill
 POST /v1/payments/requests/2S-REQ001/fulfill
 {
   "payer": {
-    "chatId": "payer_789"
+    "chatId": "9012345678"
   },
   "crypto": "USDT",
   "network": "trc20"
@@ -615,19 +649,22 @@ POST /v1/payments/requests/2S-REQ001/fulfill
   "success": true,
   "message": "Request fulfilled successfully",
   "payment": {
-    "id": "pay_reqABC789",
     "reference": "2S-REQ001",
     "status": "pending",
     "depositAddress": "TLqfASsFNgZ8UhRqJq9fCaMLB5yauoYB1m",
-    "cryptoAmount": 17.38,
+    "cryptoAmount": 17.72,
     "crypto": "USDT",
     "network": "trc20",
-    "rate": 1439.00,
-    "chargeAmount": 500,
     "fiatAmount": 25000,
     "fiatCurrency": "NGN",
-    "expiresAt": "2024-03-03T11:30:00.000Z",
-    "payerId": 15
+    "transactionUsd": 17.36,
+    "rate": 1439.00,
+    "charge": {
+      "fiat": 0,
+      "crypto": 0.3474,
+      "usd": 0.35
+    },
+    "expiresAt": "2024-03-03T11:30:00.000Z"
   }
 }
 ```
@@ -636,6 +673,7 @@ POST /v1/payments/requests/2S-REQ001/fulfill
 - Rate is locked at fulfillment time (not request creation)
 - Crypto amount is calculated based on current rate
 - Deposit address is assigned at fulfillment
+- Fee always charged from crypto on requests
 
 ---
 
@@ -666,11 +704,11 @@ const payment = await client.createPayment({
   fiatCurrency: 'NGN',
   crypto: 'USDT',
   network: 'trc20',
-  payer: { chatId: 'user_123' },
+  chargeFrom: 'fiat',
+  payer: { chatId: '7389201648' },
   receiver: {
-    bankCode: '044',
-    accountNumber: '0123456789',
-    accountName: 'John Doe',
+    bankCode: '090405',
+    accountNumber: '8012345678',
   },
 });
 
@@ -705,7 +743,7 @@ const gift = await client.createPayment({
   fiatCurrency: 'NGN',
   crypto: 'USDT',
   network: 'trc20',
-  payer: { chatId: 'sender_456' },
+  payer: { chatId: '7389201648' },
   metadata: { message: 'Happy Birthday!' },
 });
 
@@ -723,8 +761,7 @@ console.log(`Share this code: ${giftCode}`);
 const claimed = await client.claimGift(giftCode, {
   receiver: {
     bankCode: '058',
-    accountNumber: '9876543210',
-    accountName: 'Gift Recipient',
+    accountNumber: '0123456789',
   },
 });
 
@@ -744,8 +781,7 @@ const request = await client.createPayment({
   fiatCurrency: 'NGN',
   receiver: {
     bankCode: '044',
-    accountNumber: '1234567890',
-    accountName: 'Jane Smith',
+    accountNumber: '0012345678',
   },
   metadata: { invoiceId: 'INV-001' },
 });
@@ -760,7 +796,7 @@ console.log(`Amount: 15,000 NGN`);
 
 // 3. Payer fulfills (chooses crypto at this point)
 const fulfilled = await client.fulfillRequest(requestCode, {
-  payer: { chatId: 'payer_789' },
+  payer: { chatId: '9012345678' },
   crypto: 'USDT',
   network: 'trc20',
 });
@@ -827,7 +863,7 @@ class PaymentEngineClient {
 
   // Claim a gift
   async claimGift(reference, receiver) {
-    return this.request('POST', `/v1/payments/gifts/${reference}/claim`, { receiver });
+    return this.request('POST', `/v1/payments/gifts/${reference}/claim/confirm`, { receiver });
   }
 
   // Fulfill a request
@@ -846,11 +882,10 @@ const transfer = await client.createPayment({
   fiatCurrency: 'NGN',
   crypto: 'USDT',
   network: 'trc20',
-  payer: { chatId: 'user_123' },
+  payer: { chatId: '7389201648' },
   receiver: {
-    bankCode: '044',
-    accountNumber: '0123456789',
-    accountName: 'John Doe',
+    bankCode: '090405',
+    accountNumber: '8012345678',
   },
 });
 
@@ -899,7 +934,7 @@ class PaymentEngineClient:
         return response.json()
 
     def create_payment(self, payment_type: str, fiat_amount: float, fiat_currency: str,
-                       crypto: str = None, network: str = None,
+                       crypto: str = None, network: str = None, charge_from: str = None,
                        payer: dict = None, receiver: dict = None, **kwargs):
         body = {
             'type': payment_type,
@@ -908,6 +943,7 @@ class PaymentEngineClient:
         }
         if crypto: body['crypto'] = crypto
         if network: body['network'] = network
+        if charge_from: body['chargeFrom'] = charge_from
         if payer: body['payer'] = payer
         if receiver: body['receiver'] = receiver
         body.update(kwargs)
@@ -917,7 +953,7 @@ class PaymentEngineClient:
         return self._request('GET', f'/v1/payments/{reference}', {})
 
     def claim_gift(self, reference: str, receiver: dict):
-        return self._request('POST', f'/v1/payments/gifts/{reference}/claim', {'receiver': receiver})
+        return self._request('POST', f'/v1/payments/gifts/{reference}/claim/confirm', {'receiver': receiver})
 
     def fulfill_request(self, reference: str, payer: dict, crypto: str, network: str):
         return self._request('POST', f'/v1/payments/requests/{reference}/fulfill', {
@@ -937,11 +973,11 @@ result = client.create_payment(
     fiat_currency='NGN',
     crypto='USDT',
     network='trc20',
-    payer={'chatId': 'user_123'},
+    charge_from='fiat',
+    payer={'chatId': '7389201648'},
     receiver={
-        'bankCode': '044',
-        'accountNumber': '0123456789',
-        'accountName': 'John Doe',
+        'bankCode': '090405',
+        'accountNumber': '8012345678',
     }
 )
 
@@ -1010,7 +1046,7 @@ class PaymentEngineClient {
     }
 
     public function claimGift(string $reference, array $receiver): array {
-        return $this->request('POST', "/v1/payments/gifts/{$reference}/claim", ['receiver' => $receiver]);
+        return $this->request('POST', "/v1/payments/gifts/{$reference}/claim/confirm", ['receiver' => $receiver]);
     }
 
     public function fulfillRequest(string $reference, array $payer, string $crypto, string $network): array {
@@ -1031,11 +1067,11 @@ $result = $client->createPayment([
     'fiatCurrency' => 'NGN',
     'crypto' => 'USDT',
     'network' => 'trc20',
-    'payer' => ['chatId' => 'user_123'],
+    'chargeFrom' => 'fiat',
+    'payer' => ['chatId' => '7389201648'],
     'receiver' => [
-        'bankCode' => '044',
-        'accountNumber' => '0123456789',
-        'accountName' => 'John Doe',
+        'bankCode' => '090405',
+        'accountNumber' => '8012345678',
     ],
 ]);
 

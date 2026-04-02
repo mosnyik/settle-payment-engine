@@ -11,6 +11,8 @@ The payment engine supports three core transaction types:
 | **Transfer** | Direct crypto-to-bank payment | Single phase: pay crypto, receive fiat |
 | **Gift** | Send crypto as a claimable gift | Two phases: create gift, claim gift |
 | **Request** | Request payment from someone | Two phases: create request, pay request |
+| **Merchant** | Merchant checkout session | Single phase: pay crypto, merchant notified |
+| **Bank Confirmation** | Bank-managed crypto confirmation rail | Single phase: deposit confirmed, bank settles fiat |
 
 ## Quick Start
 
@@ -71,7 +73,11 @@ Show `accountName` and `bankName` to the user for confirmation before proceeding
 
 Pass `bankCode` and `accountNumber` only. The server re-resolves account details via NUBAN.
 
-**Fiat-first** (deliver a specific NGN amount):
+`chargeFrom` is **required**. It controls who bears the platform fee:
+- `"fiat"` — fee deducted from the fiat payout; receiver gets `fiatAmount - fee`
+- `"crypto"` — fee added to the crypto amount; receiver gets the full `fiatAmount`
+
+**Fiat-first** — charge from fiat (receiver gets ₦50,000 minus fee):
 
 ```http
 POST /v1/payments
@@ -86,6 +92,7 @@ Content-Type: application/json
   "fiatCurrency": "NGN",
   "crypto": "USDT",
   "network": "trc20",
+  "chargeFrom": "fiat",
   "payer": {
     "chatId": "7389201648"
   },
@@ -100,24 +107,56 @@ Content-Type: application/json
 {
   "success": true,
   "payment": {
-    "id": 17,
     "reference": "2S-K4M9PX",
     "type": "transfer",
     "status": "pending",
     "depositAddress": "TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop",
-    "cryptoAmount": 31.2658,
+    "cryptoAmount": 30.5718,
     "crypto": "USDT",
     "network": "trc20",
-    "fiatAmount": 50000,
+    "fiatAmount": 49500,
     "fiatCurrency": "NGN",
+    "transactionUsd": 30.55,
     "rate": 1620.5,
-    "chargeAmount": 500,
+    "charge": {
+      "fiat": 500,
+      "crypto": 0.3085,
+      "usd": 0.31
+    },
     "expiresAt": "2026-04-01T13:30:00.000Z"
   }
 }
 ```
 
-**Crypto-first** (payer sends a fixed crypto amount, engine calculates fiat after fees):
+> `fiatAmount` in the response is the **net** amount the receiver will receive. `transactionUsd` is that net amount in USD, used for volume analytics.
+
+**Fiat-first** — charge from crypto (receiver gets full ₦50,000, payer sends more crypto):
+
+```http
+POST /v1/payments
+X-API-Key: pk_xxxxx
+X-Timestamp: <unix ms>
+X-Signature: <hmac>
+Content-Type: application/json
+
+{
+  "type": "transfer",
+  "fiatAmount": 50000,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "chargeFrom": "crypto",
+  "payer": {
+    "chatId": "7389201648"
+  },
+  "receiver": {
+    "bankCode": "090405",
+    "accountNumber": "8012345678"
+  }
+}
+```
+
+**Crypto-first** (payer sends a fixed crypto amount, charge always from crypto):
 
 ```http
 POST /v1/payments
@@ -132,33 +171,13 @@ Content-Type: application/json
   "fiatCurrency": "NGN",
   "crypto": "USDT",
   "network": "trc20",
+  "chargeFrom": "crypto",
   "payer": {
     "chatId": "7389201648"
   },
   "receiver": {
     "bankCode": "090405",
     "accountNumber": "8012345678"
-  }
-}
-```
-
-```json
-{
-  "success": true,
-  "payment": {
-    "id": 18,
-    "reference": "2S-R7NW2Q",
-    "type": "transfer",
-    "status": "pending",
-    "depositAddress": "TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop",
-    "cryptoAmount": 31.2658,
-    "crypto": "USDT",
-    "network": "trc20",
-    "fiatAmount": 49500,
-    "fiatCurrency": "NGN",
-    "rate": 1620.5,
-    "chargeAmount": 500,
-    "expiresAt": "2026-04-01T13:30:00.000Z"
   }
 }
 ```
@@ -209,7 +228,7 @@ A gift lets the sender pay crypto upfront without knowing the recipient's bank d
 
 #### Phase 1 — Sender creates the gift
 
-No receiver needed at creation. The sender gets a deposit address and shares the `reference` with the recipient.
+No receiver needed at creation — it is set at claim time. The fee is always charged from crypto (payer bears it). The sender gets a deposit address and shares the `reference` with the recipient.
 
 **Fiat-first** (recipient receives a specific NGN amount):
 
@@ -254,7 +273,6 @@ POST /v1/payments
 {
   "success": true,
   "payment": {
-    "id": 31,
     "reference": "2S-GFT4XW",
     "type": "gift",
     "status": "pending",
@@ -264,8 +282,13 @@ POST /v1/payments
     "network": "trc20",
     "fiatAmount": 20000,
     "fiatCurrency": "NGN",
+    "transactionUsd": 12.34,
     "rate": 1620.5,
-    "chargeAmount": 500,
+    "charge": {
+      "fiat": 0,
+      "crypto": 0.3086,
+      "usd": 0.19
+    },
     "expiresAt": "2026-04-01T14:00:00.000Z"
   }
 }
@@ -426,19 +449,11 @@ Content-Type: application/json
 {
   "success": true,
   "payment": {
-    "id": 54,
     "reference": "2S-RQ7YNM",
     "type": "request",
     "status": "created",
-    "depositAddress": null,
-    "cryptoAmount": null,
-    "crypto": null,
-    "network": null,
     "fiatAmount": 15000,
-    "fiatCurrency": "NGN",
-    "rate": null,
-    "chargeAmount": null,
-    "expiresAt": null
+    "fiatCurrency": "NGN"
   }
 }
 ```
@@ -490,7 +505,6 @@ Content-Type: application/json
   "success": true,
   "message": "Request fulfilled successfully",
   "payment": {
-    "id": 54,
     "reference": "2S-RQ7YNM",
     "status": "pending",
     "depositAddress": "TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop",
@@ -499,8 +513,13 @@ Content-Type: application/json
     "network": "trc20",
     "fiatAmount": 15000,
     "fiatCurrency": "NGN",
+    "transactionUsd": 9.25,
     "rate": 1620.5,
-    "chargeAmount": 500,
+    "charge": {
+      "fiat": 0,
+      "crypto": 0.3086,
+      "usd": 0.19
+    },
     "expiresAt": "2026-04-01T15:30:00.000Z"
   }
 }
@@ -512,6 +531,84 @@ Content-Type: application/json
 
 The deposit watcher detects the transaction automatically. Once confirmed, settlement fires and NGN is sent to the receiver's bank account. Poll `GET /v1/payments/2S-RQ7YNM` until status is `settled`.
 
+### Bank Confirmation (Single Phase)
+
+For banks and financial institutions that manage their own users and fiat disbursement. The engine handles crypto deposit monitoring only — the bank confirms fiat delivery via a settlement token.
+
+No `payer` or `receiver` required. Always uses `settlementMode: self`.
+
+#### Step 1 — Create the session
+
+```http
+POST /v1/payments
+X-API-Key: pk_xxxxx
+X-Timestamp: <unix ms>
+X-Signature: <hmac>
+Content-Type: application/json
+
+{
+  "type": "bank_confirmation",
+  "fiatAmount": 50000,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "bankRef": "TXN-20260401-00123"
+}
+```
+
+```json
+{
+  "success": true,
+  "payment": {
+    "reference": "2S-XXXXXX",
+    "type": "bank_confirmation",
+    "status": "pending",
+    "depositAddress": "TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop",
+    "cryptoAmount": 30.303,
+    "crypto": "USDT",
+    "network": "trc20",
+    "fiatAmount": 50000,
+    "fiatCurrency": "NGN",
+    "transactionUsd": 30.30,
+    "rate": 1650,
+    "charge": {
+      "fiat": 0,
+      "crypto": 0.303,
+      "usd": 0.18
+    },
+    "bankRef": "TXN-20260401-00123",
+    "expiresAt": "2026-04-01T13:30:00.000Z"
+  }
+}
+```
+
+#### Step 2 — Customer sends crypto
+
+Show the customer: *Send **30.303 USDT (TRC20)** to `TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop`.*
+
+#### Step 3 — Monitor status
+
+The deposit watcher confirms on-chain. When fully confirmed, the engine fires a `payment.settling` webhook to the bank — the payload includes a one-time `settlementToken`.
+
+#### Step 4 — Bank confirms disbursement
+
+Once the bank has sent fiat to the customer:
+
+```http
+POST /v1/payments/2S-XXXXXX/settle
+X-API-Key: pk_xxxxx
+X-Timestamp: <unix ms>
+X-Signature: <hmac>
+Content-Type: application/json
+
+{
+  "settlementToken": "<token_from_webhook_payload>",
+  "settlementReference": "your-internal-disbursement-ref"
+}
+```
+
+Session moves to `settled`.
+
 ## Documentation
 
 | Document | Description |
@@ -522,12 +619,16 @@ The deposit watcher detects the transaction automatically. Once confirmed, settl
 
 ## Features
 
-- **Three Transaction Types** - Transfer, Gift, and Request with appropriate flows
+- **Five Payment Types** - Transfer, Gift, Request, Merchant, and Bank Confirmation with appropriate flows
+- **Flexible Fee Charging** - `chargeFrom: fiat` or `chargeFrom: crypto` per transfer; gifts and requests always charge from crypto
 - **Rate Locking** - Freeze exchange rates during payment window
-- **Wallet Pool** - Automatic wallet assignment with concurrency safety
+- **HD Wallet Derivation** - Unlimited unique deposit addresses from a single seed phrase
 - **Tiered Fees** - Configurable fee tiers based on transaction amount
-- **Multi-Chain** - Support for BTC, ETH, BNB, TRX, and USDT (ERC20/BEP20/TRC20)
-- **State Machine** - Valid status transitions enforced per transaction type
+- **Multi-Chain** - Support for BTC, ETH, BNB, TRX, USDT, and USDC across multiple networks
+- **Multi-Provider Settlement** - Paystack (default), Mongoro, or self-settlement per API key
+- **Per-Key Confirmation Thresholds** - Override required on-chain confirmations per chain per API key
+- **Volume Analytics** - `transactionUsd` persisted on every session for processing volume tracking
+- **State Machine** - Valid status transitions enforced per payment type
 
 ## Architecture Overview
 
@@ -621,6 +722,19 @@ src/services/payment-engine/
 ┌─────────┐    ┌────────────┐    ┌───────────┐    ┌──────────┐    ┌─────────┐
 │ PENDING │───▶│ CONFIRMING │───▶│ CONFIRMED │───▶│ SETTLING │───▶│ SETTLED │
 └─────────┘    └────────────┘    └───────────┘    └──────────┘    └─────────┘
+```
+
+### Bank Confirmation Flow
+```
+┌─────────┐    ┌────────────┐    ┌───────────┐    ┌──────────┐    ┌─────────┐
+│ PENDING │───▶│ CONFIRMING │───▶│ CONFIRMED │───▶│ SETTLING │───▶│ SETTLED │
+└─────────┘    └────────────┘    └───────────┘    └──────────┘    └─────────┘
+                                                        │ bank calls /settle
+                                                        │ with settlementToken
+                                                        ▼
+                                                   ┌─────────┐
+                                                   │ SETTLED │
+                                                   └─────────┘
 ```
 
 ## Status Definitions

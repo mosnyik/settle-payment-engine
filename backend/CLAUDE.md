@@ -1,6 +1,6 @@
 # Payment Engine
 
-A standalone Express API for crypto-to-fiat payment processing. Supports transfers, gifts, payment requests, and merchant payments with HD wallet derivation, automatic fund sweeping, and multi-provider fiat settlement (Mongoro, Paystack, self-settlement).
+A standalone Express API for crypto-to-fiat payment processing. Supports transfers, gifts, payment requests, merchant payments, and bank confirmation rails with HD wallet derivation, automatic fund sweeping, and multi-provider fiat settlement (Mongoro, Paystack, self-settlement).
 
 ## Table of Contents
 
@@ -181,7 +181,7 @@ HMAC_TIMESTAMP_TOLERANCE_MS=300000
 
 | Method | Endpoint | Permission | Description |
 |--------|----------|------------|-------------|
-| POST | `/v1/payments` | `payment:create` | Create payment (transfer, gift, request, merchant) |
+| POST | `/v1/payments` | `payment:create` | Create payment (transfer, gift, request, merchant, bank_confirmation) |
 | GET | `/v1/payments/:reference` | Public | Get payment status |
 | POST | `/v1/payments/gifts/:reference/claim/confirm` | Public | Claim a gift — provide receiver bank details, triggers settlement |
 | POST | `/v1/payments/requests/:reference/fulfill` | Public | Fulfill a request (provide payer + crypto) |
@@ -216,7 +216,7 @@ HMAC_TIMESTAMP_TOLERANCE_MS=300000
 | POST | `/v1/admin/api-keys` | Create API key |
 | GET | `/v1/admin/api-keys` | List all API keys (filter: `merchantId`) |
 | GET | `/v1/admin/api-keys/:keyId` | Get API key details |
-| PATCH | `/v1/admin/api-keys/:keyId` | Update API key (name, permissions, tier, whitelist, settlementMode) |
+| PATCH | `/v1/admin/api-keys/:keyId` | Update API key (name, permissions, tier, whitelist, settlementMode, confirmationThresholds) |
 | DELETE | `/v1/admin/api-keys/:keyId` | Revoke API key |
 | GET | `/v1/admin/api-keys/:keyId/wallets` | View funding & parent wallet addresses |
 | PUT | `/v1/admin/api-keys/:keyId/wallets` | Set parent wallet addresses (sweep destinations) |
@@ -307,7 +307,8 @@ Authorization: Bearer <ADMIN_SECRET>
 | `permissions` | string[] | e.g. `['payment:create', 'wallet:read']` |
 | `rateLimitTier` | `standard` \| `premium` \| `unlimited` | Rate limit bucket |
 | `ipWhitelist` | string[] \| null | CIDR ranges allowed to use this key |
-| `settlementMode` | `mongoro` \| `paystack` \| `self` | How fiat is disbursed for this key's payments |
+| `settlementMode` | `mongoro` \| `paystack` \| `self` | How fiat is disbursed for this key's payments (default: `paystack`) |
+| `confirmationThresholds` | object \| null | Per-chain confirmation overrides e.g. `{"bitcoin":6,"tron":30}`. Falls back to global defaults if null. |
 | `parentWalletBitcoin` | string \| null | BTC sweep destination |
 | `parentWalletEthereum` | string \| null | ETH/BSC sweep destination |
 | `parentWalletTron` | string \| null | TRX sweep destination |
@@ -335,14 +336,14 @@ Settlement mode is set per API key (`settlementMode` field). It determines how f
 
 ### 1. Mongoro (`settlementMode: "mongoro"`)
 
-Default mode. The engine calls Mongoro's bank transfer API automatically.
+The engine calls Mongoro's bank transfer API automatically.
 
 - Transfer initiated → session status: `settling`
 - Mongoro webhook (`POST /v1/webhooks/mongoro`) confirms result
 - On success → `settled`; on failure/reversal → Telegram alert → stays in `settling` for manual resolution
 - Webhook is IP-allowlisted via `MONGORO_WEBHOOK_IPS`
 
-### 2. Paystack (`settlementMode: "paystack"`)
+### 2. Paystack (`settlementMode: "paystack"`) — Default
 
 The engine initiates a Paystack bank transfer automatically.
 
@@ -387,9 +388,10 @@ POST /v1/payments/2S-XXXXXX/settle
 | Type | Payer | Receiver | Crypto/Network | Use Case |
 |------|-------|----------|----------------|----------|
 | `transfer` | Required | Required | Required | Direct payment |
-| `gift` | Required | Optional (claim later) | Required | Send crypto gift |
-| `request` | Optional (fulfill later) | Required | Optional (set at fulfill) | Payment invoice |
+| `gift` | Required | Not allowed (set at claim) | Required | Send crypto gift |
+| `request` | Not allowed (set at fulfill) | Required | Optional (set at fulfill) | Payment invoice |
 | `merchant` | Optional | Optional | Required | Merchant checkout |
+| `bank_confirmation` | Not required | Not required | Required | Bank crypto confirmation rail |
 
 ### Status Lifecycle
 
@@ -447,7 +449,11 @@ Show the user: **"Sending to John Doe — Guaranty Trust Bank. Confirm?"**
 
 **Step 3 — Create the transfer**
 
-Fiat-first (send exactly ₦10,000):
+`chargeFrom` is **required** for transfers. It controls who bears the platform fee:
+- `"fiat"` — fee deducted from the fiat payout; receiver gets `fiatAmount - fee`
+- `"crypto"` — fee added to the crypto amount; receiver gets the full `fiatAmount`
+
+Fiat-first, charge from fiat (receiver gets ₦10,000 minus fee):
 ```json
 POST /v1/payments
 {
@@ -456,6 +462,25 @@ POST /v1/payments
   "fiatCurrency": "NGN",
   "crypto": "USDT",
   "network": "trc20",
+  "chargeFrom": "fiat",
+  "payer": { "chatId": "123456789" },
+  "receiver": {
+    "bankCode": "058",
+    "accountNumber": "0123456789"
+  }
+}
+```
+
+Fiat-first, charge from crypto (receiver gets full ₦10,000, payer sends more crypto):
+```json
+POST /v1/payments
+{
+  "type": "transfer",
+  "fiatAmount": 10000,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "chargeFrom": "crypto",
   "payer": { "chatId": "123456789" },
   "receiver": {
     "bankCode": "058",
@@ -473,6 +498,7 @@ POST /v1/payments
   "fiatCurrency": "NGN",
   "crypto": "USDT",
   "network": "trc20",
+  "chargeFrom": "crypto",
   "payer": { "chatId": "123456789" },
   "receiver": {
     "bankCode": "058",
@@ -494,14 +520,21 @@ Response:
     "cryptoAmount": 50.0123,
     "crypto": "USDT",
     "network": "trc20",
-    "fiatAmount": 24750,
+    "fiatAmount": 9750,
     "fiatCurrency": "NGN",
+    "transactionUsd": 5.91,
     "rate": 1650,
-    "chargeAmount": 500,
+    "charge": {
+      "fiat": 250,
+      "crypto": 0.1515,
+      "usd": 0.15
+    },
     "expiresAt": "2026-04-01T13:30:00.000Z"
   }
 }
 ```
+
+> `fiatAmount` in the response is the **net** amount the receiver will receive (after fee if `chargeFrom: "fiat"`). `transactionUsd` is the USD equivalent of that net amount, used for volume analytics.
 
 **Step 4 — Payer sends crypto**
 
@@ -532,18 +565,19 @@ POST /v1/payments
 }
 ```
 
-1. No receiver at creation — deposit address assigned, status: `pending`
+> No `receiver` at creation — gift payments never accept a receiver upfront. The fee is always charged from crypto (payer bears it).
+
+1. Deposit address assigned, status: `pending`
 2. Sender pays crypto → deposit confirms
 3. Sender shares `reference` with recipient
-4. Recipient claims:
+4. Recipient claims (account name resolved server-side via NUBAN):
 
 ```json
-POST /v1/payments/gifts/2S-XXXXXX/claim
+POST /v1/payments/gifts/2S-XXXXXX/claim/confirm
 {
   "receiver": {
     "bankCode": "044",
-    "accountNumber": "1234567890",
-    "accountName": "Gift Recipient"
+    "accountNumber": "1234567890"
   }
 }
 ```
@@ -556,6 +590,8 @@ POST /v1/payments/gifts/2S-XXXXXX/claim
 
 The receiver specifies the fiat amount. The payer chooses which crypto to pay when fulfilling. Rate locks at fulfillment time — not at creation.
 
+> No `payer` at creation. The fee is always charged from crypto (payer bears it) — `chargeFrom` is not accepted on requests.
+
 **Step 1: Create Request**
 
 ```json
@@ -566,8 +602,7 @@ POST /v1/payments
   "fiatCurrency": "NGN",
   "receiver": {
     "bankCode": "058",
-    "accountNumber": "0987654321",
-    "accountName": "Jane Smith"
+    "accountNumber": "0987654321"
   }
 }
 ```
@@ -588,6 +623,29 @@ POST /v1/payments/requests/2S-XXXXXX/fulfill
 ```
 
 Response: rate locked, `depositAddress` and `cryptoAmount` assigned, status → `pending`.
+```json
+{
+  "success": true,
+  "payment": {
+    "reference": "2S-XXXXXX",
+    "status": "pending",
+    "depositAddress": "TXxxxxxxxxxxxxxxxxxxxxxx",
+    "cryptoAmount": 9.1818,
+    "crypto": "USDT",
+    "network": "trc20",
+    "fiatAmount": 15000,
+    "fiatCurrency": "NGN",
+    "transactionUsd": 9.09,
+    "rate": 1650,
+    "charge": {
+      "fiat": 0,
+      "crypto": 0.0909,
+      "usd": 0.055
+    },
+    "expiresAt": "2026-04-01T13:30:00.000Z"
+  }
+}
+```
 
 **Step 4–5:** Payer sends crypto → watcher confirms → settlement sends fiat
 
@@ -609,6 +667,81 @@ POST /v1/payments
 ```
 
 Rate locked, deposit address assigned, status: `pending`. Show hosted checkout at `pay.2settle.io/p/:reference`. On success, redirect to `callbackUrl?reference=...&status=settled`.
+
+### 5. Bank Confirmation Flow
+
+For banks and financial institutions that manage their own users and fiat disbursement. The bank tracks who sent what internally — the engine only handles the crypto deposit and confirmation.
+
+- No `payer` or `receiver` required
+- Always uses `settlementMode: self` — the bank handles fiat disbursement
+- `bankRef` is the bank's own internal transaction reference (optional but recommended for reconciliation)
+- Per-key `confirmationThresholds` can override the global required confirmations per chain
+
+**Step 1 — Create the session**
+
+```json
+POST /v1/payments
+{
+  "type": "bank_confirmation",
+  "fiatAmount": 50000,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "bankRef": "TXN-20260401-00123"
+}
+```
+
+Response:
+```json
+{
+  "success": true,
+  "payment": {
+    "reference": "2S-XXXXXX",
+    "status": "pending",
+    "depositAddress": "TXxxxxxxxxxxxxxxxxxxxxxx",
+    "cryptoAmount": 30.303,
+    "crypto": "USDT",
+    "network": "trc20",
+    "fiatAmount": 50000,
+    "fiatCurrency": "NGN",
+    "transactionUsd": 30.30,
+    "rate": 1650,
+    "charge": {
+      "fiat": 0,
+      "crypto": 0.303,
+      "usd": 0.18
+    },
+    "bankRef": "TXN-20260401-00123",
+    "expiresAt": "2026-04-01T13:30:00.000Z"
+  }
+}
+```
+
+**Step 2 — Customer sends crypto**
+
+Bank shows customer: *Send **30.303 USDT (TRC20)** to `TXxxxxxxxxxxxxxxxxxxxxxx`.*
+
+**Step 3 — Automatic on-chain monitoring**
+
+| Event | Status | Webhook |
+|---|---|---|
+| Deposit detected | `confirming` | `payment.confirming` |
+| Confirmations complete | `confirmed` | `payment.confirmed` |
+| Ready for bank disbursement | `settling` | `payment.settling` — includes `settlementToken` |
+
+**Step 4 — Bank confirms disbursement**
+
+Once the bank has sent fiat to the customer, it calls:
+
+```json
+POST /v1/payments/2S-XXXXXX/settle
+{
+  "settlementToken": "<token_from_webhook_payload>",
+  "settlementReference": "your-internal-disbursement-ref"
+}
+```
+
+Session moves to `settled`.
 
 ### Supported Crypto/Network Combinations
 
@@ -725,6 +858,15 @@ SOURCE src/services/payment-engine/settlement/migrations/001_create_settlement_t
 
 -- Security tables
 SOURCE src/security/migrations/001_create_security_tables.sql;
+
+-- Analytics: USD value per transaction
+SOURCE src/services/payment-engine/migrations/006_add_transaction_usd.sql;
+
+-- Bank confirmation type + per-key confirmation thresholds + bank_ref column
+SOURCE src/security/migrations/007_bank_confirmation.sql;
+
+-- Change default settlement mode to paystack
+SOURCE src/security/migrations/008_settlement_mode_paystack_default.sql;
 ```
 
 ### Core Tables
@@ -920,12 +1062,14 @@ POST {{baseUrl}}/payments/2S-XXXXXX/settle
 
 ## Deposit Watcher
 
-| Chain | API | Confirmations Required | Default Poll |
+| Chain | API | Default Confirmations | Default Poll |
 |-------|-----|----------------------|--------------|
 | Bitcoin | Blockstream | 2 | 60s |
 | Ethereum | Etherscan | 12 | 15s |
 | BSC | BscScan | 15 | 5s |
 | Tron | TronGrid | 19 | 5s |
+
+> **Per-key overrides:** Set `confirmationThresholds` on an API key to override the defaults for specific chains (e.g. `{"bitcoin": 6, "tron": 30}`). The watcher uses the per-key threshold when present and falls back to the global defaults above.
 
 ### Fraud Protection
 

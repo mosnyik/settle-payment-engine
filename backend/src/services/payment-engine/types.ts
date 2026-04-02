@@ -8,7 +8,7 @@
 // ENUMS
 // =============================================================================
 
-export type PaymentType = 'transfer' | 'gift' | 'request' | 'merchant';
+export type PaymentType = 'transfer' | 'gift' | 'request' | 'merchant' | 'bank_confirmation';
 
 export type PaymentStatus =
   | 'created'
@@ -80,10 +80,14 @@ export interface CreatePaymentInput {
   merchantReference?: string;
   callbackUrl?: string;
   metadata?: Record<string, unknown>;
+  /** Bank's own internal transaction reference (bank_confirmation type only) */
+  bankRef?: string;
   // Populated from API key at request time
   apiKeyId?: number;
   fundingWalletIndex?: number;
   parentWallet?: string; // Chain-specific parent wallet address for sweep destination
+  /** Per-key confirmation threshold overrides — populated from api_keys.confirmation_thresholds */
+  confirmationThresholds?: Partial<Record<string, number>>;
 }
 
 // =============================================================================
@@ -131,6 +135,8 @@ export interface PaymentSession {
   confirmedAt?: Date;
   settledAt?: Date;
   metadata?: Record<string, unknown>;
+  /** Bank's own internal transaction reference (bank_confirmation type only) */
+  bankRef?: string;
 }
 
 // =============================================================================

@@ -35,6 +35,8 @@ export interface ApiKey {
   parentWalletBitcoin: string | null;
   parentWalletEthereum: string | null;
   parentWalletTron: string | null;
+  /** Per-chain confirmation threshold overrides, e.g. {"bitcoin":6,"tron":30} */
+  confirmationThresholds: Partial<Record<string, number>> | null;
 }
 
 export interface CreateApiKeyInput {
@@ -47,7 +49,9 @@ export interface CreateApiKeyInput {
   // Wallet-as-a-Service fields
   webhookUrl?: string;
   sweepAddress?: string;
-  settlementMode?: 'mongoro' | 'self';
+  settlementMode?: 'mongoro' | 'paystack' | 'self';
+  /** Per-chain confirmation threshold overrides, e.g. {"bitcoin":6,"tron":30} */
+  confirmationThresholds?: Partial<Record<string, number>>;
 }
 
 export interface ApiKeyWithSecret {

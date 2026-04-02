@@ -37,6 +37,7 @@ export interface CreateSessionData {
   apiKeyId?: number;
   expiresAt: Date;
   metadata?: Record<string, unknown>;
+  bankRef?: string;
 }
 
 export interface UpdateSessionData {
@@ -96,6 +97,7 @@ function rowToSession(row: any): PaymentSession {
     confirmedAt: row.confirmed_at ? new Date(row.confirmed_at) : undefined,
     settledAt: row.settled_at ? new Date(row.settled_at) : undefined,
     metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+    bankRef: row.bank_ref || undefined,
   };
 }
 
@@ -114,8 +116,8 @@ export class SessionRepository {
           funding_wallet_index, parent_wallet,
           payer_id, receiver_id, merchant_id, api_key_id,
           expires_at, created_at, updated_at,
-          metadata
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          metadata, bank_ref
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.id,
           data.reference,
@@ -143,6 +145,7 @@ export class SessionRepository {
           now,
           now,
           data.metadata ? JSON.stringify(data.metadata) : null,
+          data.bankRef ?? null,
         ]
       );
 

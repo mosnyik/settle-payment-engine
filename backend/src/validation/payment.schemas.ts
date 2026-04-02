@@ -11,7 +11,7 @@ import { z } from 'zod';
 // CONSTANTS
 // =============================================================================
 
-const PAYMENT_TYPES = ['transfer', 'gift', 'request', 'merchant'] as const;
+const PAYMENT_TYPES = ['transfer', 'gift', 'request', 'merchant', 'bank_confirmation'] as const;
 const FIAT_CURRENCIES = ['NGN', 'GHS', 'KES', 'ZAR'] as const;
 const CRYPTO_CURRENCIES = ['BTC', 'ETH', 'BNB', 'TRX', 'USDT', 'USDC'] as const;
 const NETWORKS = [
@@ -66,6 +66,8 @@ const basePaymentSchema = z.object({
   merchantReference: z.string().optional(),
   callbackUrl: z.string().url().optional(),
   metadata: z.record(z.unknown()).optional(),
+  /** Bank's own internal transaction reference (bank_confirmation type only) */
+  bankRef: z.string().max(100).optional(),
 });
 
 /** Create payment schema with type-specific validation */
@@ -75,7 +77,7 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
   const hasCrypto = data.cryptoAmount !== undefined;
 
   // Requests are fiat-only — cryptoAmount is never valid
-  if (data.type === 'request' && hasCrypto) {
+  if ((data.type === 'request') && hasCrypto) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'cryptoAmount is not valid for request type — use fiatAmount instead',
@@ -92,7 +94,7 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
   }
 
   // Crypto-first path: fiatAmount absent, cryptoAmount present (not applicable to requests)
-  if (!hasFiat && hasCrypto && data.type !== 'request') {
+  if (!hasFiat && hasCrypto && data.type !== 'request' && data.type !== 'bank_confirmation') {
     if (!data.crypto) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -142,11 +144,28 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
 
     case 'request':
       // Crypto and network are optional for requests (set at fulfillment)
-      // No validation needed here
       break;
 
     case 'merchant':
-      // Merchant payments may have different requirements
+      break;
+
+    case 'bank_confirmation':
+      // Crypto and network are required — bank knows what the customer is sending
+      if (!data.crypto) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Crypto is required for bank confirmation payments',
+          path: ['crypto'],
+        });
+      }
+      if (!data.network) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Network is required for bank confirmation payments',
+          path: ['network'],
+        });
+      }
+      // Payer and receiver are not required — bank manages its own users and fiat disbursement
       break;
   }
 
@@ -204,7 +223,10 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
       break;
 
     case 'merchant':
-      // Merchant payments may have different requirements
+      break;
+
+    case 'bank_confirmation':
+      // No payer or receiver required — bank handles user identity and fiat disbursement
       break;
   }
 });

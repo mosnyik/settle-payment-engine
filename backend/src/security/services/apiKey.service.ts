@@ -40,6 +40,7 @@ interface ApiKeyRow extends RowDataPacket {
   parent_wallet_bitcoin: string | null;
   parent_wallet_ethereum: string | null;
   parent_wallet_tron: string | null;
+  confirmation_thresholds: string | null;
 }
 
 /**
@@ -86,6 +87,11 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
     parentWalletBitcoin: row.parent_wallet_bitcoin ?? null,
     parentWalletEthereum: row.parent_wallet_ethereum ?? null,
     parentWalletTron: row.parent_wallet_tron ?? null,
+    confirmationThresholds: row.confirmation_thresholds
+      ? (typeof row.confirmation_thresholds === 'string'
+          ? JSON.parse(row.confirmation_thresholds)
+          : row.confirmation_thresholds)
+      : null,
   };
 }
 
@@ -123,9 +129,9 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWith
     `INSERT INTO api_keys (
       key_id, key_hash, merchant_id, name, permissions, rate_limit_tier,
       ip_whitelist, expires_at, webhook_url, webhook_secret, sweep_address,
-      settlement_mode,
+      settlement_mode, confirmation_thresholds,
       funding_wallet_index, funding_wallet_bitcoin, funding_wallet_ethereum, funding_wallet_tron
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       keyId,
       keyHash,
@@ -139,6 +145,7 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWith
       webhookSecret,
       input.sweepAddress || null,
       input.settlementMode || 'self',
+      input.confirmationThresholds ? JSON.stringify(input.confirmationThresholds) : null,
       fundingWalletIndex,
       fundingWalletBitcoin,
       fundingWalletEthereum,
@@ -298,6 +305,7 @@ export async function updateApiKey(
     webhookUrl?: string | null;
     sweepAddress?: string | null;
     settlementMode?: 'mongoro' | 'paystack' | 'self';
+    confirmationThresholds?: Partial<Record<string, number>> | null;
   }
 ): Promise<ApiKey | null> {
   const setClauses: string[] = [];
@@ -341,6 +349,11 @@ export async function updateApiKey(
   if (updates.settlementMode !== undefined) {
     setClauses.push('settlement_mode = ?');
     values.push(updates.settlementMode);
+  }
+
+  if (updates.confirmationThresholds !== undefined) {
+    setClauses.push('confirmation_thresholds = ?');
+    values.push(updates.confirmationThresholds ? JSON.stringify(updates.confirmationThresholds) : null);
   }
 
   if (setClauses.length === 0) {

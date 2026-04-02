@@ -110,7 +110,7 @@ export type AmountMatchResult =
 /** Session being watched for deposits */
 export interface WatchedSession {
   id: string;
-  type: 'transfer' | 'gift' | 'request' | 'merchant';
+  type: 'transfer' | 'gift' | 'request' | 'merchant' | 'bank_confirmation';
   depositAddress: string;
   network: Network;
   chain: WatchableChain;
@@ -121,6 +121,8 @@ export interface WatchedSession {
   hdChain?: HDChain; // HD wallet chain (for sweeper)
   fundingWalletIndex?: number; // For gas pre-funding on token sweeps
   toAddress?: string; // Sweep destination — falls back to hot wallet if absent
+  /** Per-key confirmation threshold overrides from api_keys.confirmation_thresholds */
+  confirmationThresholds?: Partial<Record<string, number>>;
   status: 'pending' | 'confirming';
   txHash?: string;
   expiresAt: Date;

@@ -97,7 +97,10 @@ function validateCreateInput(input: CreatePaymentInput): void {
     }
   }
 
-  // Crypto/network required for transfer and gift, optional for request (set at fulfillment)
+  // bank_confirmation: no payer/receiver required — bank manages its own users and fiat
+  // crypto + network are enforced by the generic check above (type !== 'request')
+
+  // Crypto/network required for transfer, gift, and bank_confirmation; optional for request
   if (input.type !== 'request') {
     if (!input.crypto) {
       throw new InvalidInputError('Crypto is required', 'crypto');
@@ -200,6 +203,7 @@ export class SessionManager {
         parentWallet: resolvedInput.parentWallet,
         expiresAt,
         metadata: resolvedInput.metadata,
+        bankRef: resolvedInput.bankRef,
       };
 
       return this.repository.create(sessionData);
@@ -267,6 +271,7 @@ export class SessionManager {
       apiKeyId: resolvedInput.apiKeyId,
       expiresAt,
       metadata: resolvedInput.metadata,
+      bankRef: resolvedInput.bankRef,
     };
 
     const session = await this.repository.create(sessionData);
@@ -293,6 +298,7 @@ export class SessionManager {
         fundingWalletIndex: session.fundingWalletIndex,
         toAddress: session.parentWallet,
         expiresAt: session.expiresAt,
+        confirmationThresholds: resolvedInput.confirmationThresholds,
       });
     }
 

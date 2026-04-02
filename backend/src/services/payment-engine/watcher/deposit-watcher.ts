@@ -241,7 +241,7 @@ export class DepositWatcher extends EventEmitter {
    */
   watch(params: {
     sessionId: string;
-    type: 'transfer' | 'gift' | 'request' | 'merchant';
+    type: 'transfer' | 'gift' | 'request' | 'merchant' | 'bank_confirmation';
     depositAddress: string;
     network: Network;
     cryptoCurrency: CryptoCurrency;
@@ -252,6 +252,7 @@ export class DepositWatcher extends EventEmitter {
     fundingWalletIndex?: number;
     toAddress?: string;
     expiresAt: Date;
+    confirmationThresholds?: Partial<Record<string, number>>;
   }): void {
     const chain = NETWORK_TO_WATCHABLE_CHAIN[params.network];
 
@@ -268,6 +269,7 @@ export class DepositWatcher extends EventEmitter {
       hdChain: params.hdChain,
       fundingWalletIndex: params.fundingWalletIndex,
       toAddress: params.toAddress,
+      confirmationThresholds: params.confirmationThresholds,
       status: 'pending',
       expiresAt: params.expiresAt,
     };
@@ -784,12 +786,13 @@ export class DepositWatcher extends EventEmitter {
       return;
     }
 
-    const requiredConfirmations = REQUIRED_CONFIRMATIONS[session.chain];
+    const baseConfirmations =
+      session.confirmationThresholds?.[session.chain] ?? REQUIRED_CONFIRMATIONS[session.chain];
     // Require more confirmations for RBF-enabled Bitcoin transactions
     const effectiveRequired =
       session.chain === 'bitcoin' && tx.isRbfEnabled
-        ? Math.max(requiredConfirmations, 3)
-        : requiredConfirmations;
+        ? Math.max(baseConfirmations, 3)
+        : baseConfirmations;
 
     if (tx.confirmations >= effectiveRequired) {
       // Confirmed!

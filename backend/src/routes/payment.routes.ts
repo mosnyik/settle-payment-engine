@@ -96,9 +96,11 @@ router.post(
       merchantReference: input.merchantReference,
       callbackUrl: input.callbackUrl,
       metadata: input.metadata,
+      bankRef: input.bankRef,
       apiKeyId: apiKey?.id,
       fundingWalletIndex: apiKey?.fundingWalletIndex ?? undefined,
       parentWallet,
+      confirmationThresholds: apiKey?.confirmationThresholds ?? undefined,
     });
 
     // Link participants if provided
@@ -271,16 +273,6 @@ router.get(
     next(err);
   }
 });
-
-// =============================================================================
-// CLAIM GIFT — STEP 1: VERIFY
-// =============================================================================
-
-// Removed: POST /payments/gifts/:reference/claim/verify
-// Use POST /payments/verify-receiver instead — it serves the same purpose
-// (NUBAN lookup + return account details for confirmation) without being
-// scoped to a specific gift reference. The confirm step below re-validates
-// the session state so nothing is lost.
 
 // =============================================================================
 // CLAIM GIFT — STEP 2: CONFIRM

@@ -1,5 +1,6 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import timeout from 'connect-timeout';
 import config from './config';
 import routes from './routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -26,7 +27,14 @@ const app = express();
 // SECURITY MIDDLEWARE (Order matters!)
 // =============================================================================
 
-// 1. Security headers (always first - applies to all responses)
+// 1. Global timeout — 15s default; settlement endpoints get 30s (overridden per route)
+app.use(timeout('15s'));
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if ((req as any).timedout) return;
+  next();
+});
+
+// 2. Security headers (always first - applies to all responses)
 app.use(securityHeaders);
 
 // 2. Request context (generates request ID, captures timing)

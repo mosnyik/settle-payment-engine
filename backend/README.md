@@ -759,7 +759,7 @@ src/services/payment-engine/
 | ₦100,001 - ₦1,000,000 | ₦1,000 |
 | ₦1,000,001 - ₦2,000,000 | ₦1,500 |
 
-**Limits**: Min ₦0, Max ₦2,000,000
+**Limits**: Min ₦1, Max ₦2,000,000
 
 ## Supported Networks
 

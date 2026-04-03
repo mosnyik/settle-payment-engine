@@ -22,7 +22,7 @@ export interface ChargeResult {
 }
 
 export const AMOUNT_LIMITS = {
-  MIN: 0,
+  MIN: 1,
   MAX: 2_000_000,
 } as const;
 

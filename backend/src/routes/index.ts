@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import timeout from 'connect-timeout';
 import transferRoutes from './transfer.routes';
 import giftRoutes from './gift.routes';
 import requestRoutes from './request.routes';
@@ -11,6 +12,7 @@ import paymentRoutes from './payment.routes';
 import walletRoutes from './wallet.routes';
 import authRoutes from './auth.routes';
 import meRoutes from './me.routes';
+import historyRoutes from './history.routes';
 import webhookRoutes from './webhook.routes';
 import {
   deprecateTransferRoutes,
@@ -24,7 +26,8 @@ const router = Router();
 // =============================================================================
 // NEW UNIFIED ROUTES (preferred)
 // =============================================================================
-router.use('/payments', paymentRoutes);
+// Payment routes — 30s timeout (creation involves rate fetch + wallet derivation + settlement)
+router.use('/payments', timeout('30s'), paymentRoutes);
 
 // =============================================================================
 // WALLET-AS-A-SERVICE ROUTES
@@ -46,8 +49,8 @@ router.use('/rate', rateRoutes);
 router.use('/banks', bankRoutes);
 router.use('/crypto', cryptoRoutes);
 
-// Webhook routes (public - provider signature verification handled internally)
-router.use('/webhooks', webhookRoutes);
+// Webhook routes — 30s timeout (provider callbacks may include settlement processing)
+router.use('/webhooks', timeout('30s'), webhookRoutes);
 
 // Admin routes (uses separate admin auth, not HMAC)
 router.use('/admin', adminRoutes);
@@ -57,5 +60,8 @@ router.use('/auth', authRoutes);
 
 // Me routes (HMAC-authenticated, user-scoped)
 router.use('/me', meRoutes);
+
+// Unified transaction history (legacy + payment engine)
+router.use('/history', historyRoutes);
 
 export default router;

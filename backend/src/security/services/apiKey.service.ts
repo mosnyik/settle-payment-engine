@@ -375,7 +375,7 @@ export async function updateApiKey(
  */
 export function hasPermission(apiKey: ApiKey, requiredPermission: string): boolean {
   if (!apiKey.permissions || apiKey.permissions.length === 0) {
-    return true; // No permissions = all access
+    return false; // No permissions = no access
   }
 
   return apiKey.permissions.some((perm) => {

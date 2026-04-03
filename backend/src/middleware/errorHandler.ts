@@ -32,6 +32,15 @@ export function errorHandler(
     message: err.message,
   });
 
+  // Handle timeout errors
+  if (err.code === 'ETIMEDOUT' || (err as any).timeout) {
+    res.status(503).json({
+      error: 'Request timed out. Please try again.',
+      code: 'REQUEST_TIMEOUT',
+    });
+    return;
+  }
+
   // Handle Zod validation errors
   if (err instanceof ZodError) {
     res.status(400).json({

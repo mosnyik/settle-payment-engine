@@ -69,9 +69,10 @@ const basePaymentSchema = z.object({
   /** Bank's own internal transaction reference (bank_confirmation type only) */
   bankRef: z.string().max(100).optional(),
   /**
-   * Transfer only. Controls which side bears the platform fee.
+   * Required for transfer and gift. Controls which side bears the platform fee.
    * 'fiat'   — charge deducted from fiat payout; receiver gets fiatAmount - charge.
-   * 'crypto' — charge added to crypto; receiver gets full fiatAmount.
+   * 'crypto' — charge added to crypto; receiver gets full fiatAmount (payer sends more).
+   * Requests always charge from crypto (set at fulfillment) — do not send for requests.
    */
   chargeFrom: z.enum(['fiat', 'crypto']).optional(),
 });
@@ -227,10 +228,10 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
           path: ['receiver'],
         });
       }
-      if (data.chargeFrom) {
+      if (!data.chargeFrom) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'chargeFrom is not valid for gifts — charge is always added to the crypto amount',
+          message: "chargeFrom is required for gifts — specify 'fiat' (deduct fee from payout) or 'crypto' (payer sends extra)",
           path: ['chargeFrom'],
         });
       }

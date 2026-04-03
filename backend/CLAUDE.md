@@ -304,7 +304,7 @@ Authorization: Bearer <ADMIN_SECRET>
 |-------|------|-------------|
 | `keyId` | string | Public key (`pk_xxxxx`) |
 | `merchantId` | string | Associated merchant |
-| `permissions` | string[] | e.g. `['payment:create', 'wallet:read']` |
+| `permissions` | string[] | e.g. `['payment:create', 'wallet:read']`. Use `['*']` for full access. Empty array = no access. |
 | `rateLimitTier` | `standard` \| `premium` \| `unlimited` | Rate limit bucket |
 | `ipWhitelist` | string[] \| null | CIDR ranges allowed to use this key |
 | `settlementMode` | `mongoro` \| `paystack` \| `self` | How fiat is disbursed for this key's payments (default: `paystack`) |

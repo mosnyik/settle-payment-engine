@@ -196,6 +196,7 @@ HMAC_TIMESTAMP_TOLERANCE_MS=300000
 | GET | `/v1/me/payments/stats` | Count of payments per status |
 | GET | `/v1/me/payments/:reference` | Get single payment with settlement attempts |
 | GET | `/v1/me/audit-logs` | Get own audit logs (filterable: `from`, `to`, `action`) |
+| GET | `/v1/me/reports/reconciliation` | Settlement report scoped to this API key. Same params as admin version but restricted to own sessions. |
 
 ### Wallet-as-a-Service Endpoints (HMAC Auth Required)
 
@@ -234,6 +235,12 @@ HMAC_TIMESTAMP_TOLERANCE_MS=300000
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/v1/admin/audit-logs` | Get all audit logs (filter: `apiKeyId`, `merchantId`, `action`, `from`, `to`, `success`) |
+
+#### Reports
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/admin/reports/reconciliation` | End-of-day reconciliation report for all payments. Returns CSV by default. Params: `from`, `to`, `status` (default `settled`, pass `all` to skip filter), `type`, `format` (`csv` or `json`). |
 
 ### Webhook Endpoints (Public — Provider-Verified)
 

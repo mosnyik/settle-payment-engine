@@ -512,6 +512,60 @@ Content-Type: application/json
 
 The deposit watcher detects the transaction automatically. Once confirmed, settlement fires and NGN is sent to the receiver's bank account. Poll `GET /v1/payments/2S-RQ7YNM` until status is `settled`.
 
+## Reconciliation Reports
+
+Download end-of-day settlement statements as CSV or JSON.
+
+### Admin — full platform report
+
+```http
+GET /v1/admin/reports/reconciliation
+Authorization: Bearer <ADMIN_SECRET>
+```
+
+### Merchant — own sessions only
+
+```http
+GET /v1/me/reports/reconciliation
+X-API-Key: pk_xxxxx
+X-Timestamp: <unix ms>
+X-Signature: <hmac>
+```
+
+**Query params:**
+
+| Param | Default | Description |
+|-------|---------|-------------|
+| `from` | start of yesterday | ISO date string — range start |
+| `to` | end of yesterday | ISO date string — range end |
+| `status` | `settled` | Payment status filter. Pass `all` to include every status. |
+| `type` | _(all)_ | Filter by payment type: `transfer`, `gift`, `request`, `merchant`, `bank_confirmation` |
+| `format` | `csv` | `csv` for a downloadable file, `json` for an API response |
+
+**CSV columns:** `reference`, `type`, `status`, `fiat_amount`, `fiat_currency`, `charge_amount`, `net_fiat_amount`, `transaction_usd`, `crypto`, `network`, `crypto_amount`, `received_amount`, `rate`, `tx_hash`, `settlement_reference`, `settlement_provider`, receiver bank details, `payer_chat_id`, `merchant_id`, `merchant_reference`, `bank_ref`, `created_at`, `confirmed_at`, `settled_at`.
+
+A summary row with totals (fiat volume, charges, net fiat, USD volume) is appended at the bottom of each CSV.
+
+**JSON summary shape (`format=json`):**
+
+```json
+{
+  "status": true,
+  "data": {
+    "from": "2026-04-07T00:00:00.000Z",
+    "to": "2026-04-07T23:59:59.999Z",
+    "count": 142,
+    "payments": [...],
+    "summary": {
+      "totalFiatAmount": 7420000,
+      "totalCharges": 71000,
+      "totalNetFiat": 7349000,
+      "totalUsd": 4527.83
+    }
+  }
+}
+```
+
 ## Documentation
 
 | Document | Description |
@@ -522,12 +576,15 @@ The deposit watcher detects the transaction automatically. Once confirmed, settl
 
 ## Features
 
-- **Three Transaction Types** - Transfer, Gift, and Request with appropriate flows
+- **Five Transaction Types** - Transfer, Gift, Request, Merchant checkout, Bank confirmation rail
 - **Rate Locking** - Freeze exchange rates during payment window
-- **Wallet Pool** - Automatic wallet assignment with concurrency safety
+- **HD Wallet Derivation** - BIP32/44/84, unlimited unique deposit addresses
 - **Tiered Fees** - Configurable fee tiers based on transaction amount
-- **Multi-Chain** - Support for BTC, ETH, BNB, TRX, and USDT (ERC20/BEP20/TRC20)
+- **Multi-Chain** - Support for BTC, ETH, BNB, TRX, USDT and USDC (ERC20/BEP20/TRC20)
 - **State Machine** - Valid status transitions enforced per transaction type
+- **Multi-Provider Settlement** - Paystack (default), Mongoro, or self-settlement
+- **Reconciliation Reports** - End-of-day CSV/JSON exports for banks and merchants
+- **WaaS** - Wallet-as-a-Service: provision monitored deposit addresses for external platforms
 
 ## Architecture Overview
 
@@ -613,7 +670,7 @@ The deposit watcher detects the transaction automatically. Once confirmed, settl
 | ₦100,001 - ₦1,000,000 | ₦1,000 |
 | ₦1,000,001 - ₦2,000,000 | ₦1,500 |
 
-**Limits**: Min ₦0, Max ₦2,000,000
+**Limits**: Min ₦1, Max ₦2,000,000
 
 ## Supported Networks
 

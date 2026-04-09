@@ -37,6 +37,7 @@ const createApiKeySchema = z.object({
   expiresAt: z.string().datetime().optional().transform(val => val ? new Date(val) : undefined),
   settlementMode: z.enum(['mongoro', 'paystack', 'self']).optional(),
   confirmationThresholds: confirmationThresholdsSchema,
+  isSandbox: z.boolean().optional(),
 });
 
 const updateApiKeySchema = z.object({

@@ -75,6 +75,16 @@ const basePaymentSchema = z.object({
    * Requests always charge from crypto (set at fulfillment) — do not send for requests.
    */
   chargeFrom: z.enum(['fiat', 'crypto']).optional(),
+  /**
+   * When true, the payment is recorded as settled immediately.
+   * - Sandbox keys: simulates the full lifecycle (pending → … → settled).
+   * - Live keys: directly inserts as settled — use this to record manual/external transfers.
+   */
+  autoSettle: z.boolean().optional(),
+  /** Real blockchain tx hash — recorded when autoSettle is true on a live key. */
+  txHash: z.string().max(100).optional(),
+  /** Your internal settlement/disbursement reference — recorded when autoSettle is true on a live key. */
+  settlementReference: z.string().max(100).optional(),
 });
 
 /** Create payment schema with type-specific validation */

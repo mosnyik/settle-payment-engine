@@ -41,6 +41,7 @@ interface ApiKeyRow extends RowDataPacket {
   parent_wallet_ethereum: string | null;
   parent_wallet_tron: string | null;
   confirmation_thresholds: string | null;
+  is_sandbox: boolean;
 }
 
 /**
@@ -92,6 +93,7 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
           ? JSON.parse(row.confirmation_thresholds)
           : row.confirmation_thresholds)
       : null,
+    isSandbox: Boolean(row.is_sandbox),
   };
 }
 
@@ -100,7 +102,7 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
  * Returns the secret key only once - it cannot be retrieved later
  */
 export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWithSecret & { webhookSecret?: string }> {
-  const { keyId, secretKey } = generateApiKeyPair();
+  const { keyId, secretKey } = generateApiKeyPair(input.isSandbox ?? false);
   const keyHash = sha256(secretKey);
 
   // Generate webhook secret if webhook URL is provided
@@ -128,10 +130,10 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWith
   const [result] = await pool.query<ResultSetHeader>(
     `INSERT INTO api_keys (
       key_id, key_hash, merchant_id, name, permissions, rate_limit_tier,
-      ip_whitelist, expires_at, webhook_url, webhook_secret, sweep_address,
+      ip_whitelist, is_active, is_sandbox, expires_at, webhook_url, webhook_secret, sweep_address,
       settlement_mode, confirmation_thresholds,
       funding_wallet_index, funding_wallet_bitcoin, funding_wallet_ethereum, funding_wallet_tron
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       keyId,
       keyHash,
@@ -140,6 +142,7 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWith
       input.permissions ? JSON.stringify(input.permissions) : null,
       input.rateLimitTier || 'standard',
       input.ipWhitelist ? JSON.stringify(input.ipWhitelist) : null,
+      input.isSandbox ? 1 : 0,
       input.expiresAt || null,
       input.webhookUrl || null,
       webhookSecret,

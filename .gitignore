@@ -7,6 +7,7 @@ dist
 # deployment
 
 /CLAUDE.md
+/backend/CLAUDE.md
 
 # generated/utility scripts
 /*.js

@@ -39,6 +39,7 @@ export interface CreateSessionData {
   expiresAt: Date;
   metadata?: Record<string, unknown>;
   bankRef?: string;
+  isSandbox?: boolean;
 }
 
 export interface UpdateSessionData {
@@ -101,6 +102,7 @@ function rowToSession(row: any): PaymentSession {
     settledAt: row.settled_at ? new Date(row.settled_at) : undefined,
     metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
     bankRef: row.bank_ref || undefined,
+    isSandbox: Boolean(row.is_sandbox),
   };
 }
 
@@ -117,10 +119,10 @@ export class SessionRepository {
           rate, asset_price, charge_amount,
           deposit_address, wallet_id, derivation_index, hd_chain,
           funding_wallet_index, parent_wallet,
-          payer_id, receiver_id, merchant_id, api_key_id,
+          payer_id, receiver_id, merchant_id, api_key_id, is_sandbox,
           expires_at, created_at, updated_at,
           metadata, bank_ref
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.id,
           data.reference,
@@ -145,6 +147,7 @@ export class SessionRepository {
           data.receiverId || null,
           data.merchantId || null,
           data.apiKeyId || null,
+          data.isSandbox ? 1 : 0,
           data.expiresAt,
           now,
           now,

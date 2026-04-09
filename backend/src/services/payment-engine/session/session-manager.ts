@@ -204,6 +204,7 @@ export class SessionManager {
         expiresAt,
         metadata: resolvedInput.metadata,
         bankRef: resolvedInput.bankRef,
+        isSandbox: resolvedInput.isSandbox,
       };
 
       return this.repository.create(sessionData);
@@ -275,6 +276,7 @@ export class SessionManager {
       expiresAt,
       metadata: resolvedInput.metadata,
       bankRef: resolvedInput.bankRef,
+      isSandbox: resolvedInput.isSandbox,
     };
 
     const session = await this.repository.create(sessionData);
@@ -286,8 +288,9 @@ export class SessionManager {
 
     // Notify deposit watcher to start monitoring this session
     // Only watch if we have all required crypto fields (not for requests without crypto)
+    // Sandbox sessions skip the real watcher — deposits are simulated via /sandbox/payments/:ref/simulate-deposit
     const watcher = getDepositWatcher();
-    if (watcher?.isActive() && session.depositAddress && session.network && session.crypto && session.cryptoAmount) {
+    if (!resolvedInput.isSandbox && watcher?.isActive() && session.depositAddress && session.network && session.crypto && session.cryptoAmount) {
       watcher.watch({
         sessionId: session.id,
         type: session.type,
@@ -577,9 +580,9 @@ export class SessionManager {
       await hdWallet.linkAddressToSession(depositAddress, sessionId);
     }
 
-    // Start watching for deposits - we just set all these values so they're non-null
+    // Start watching for deposits — skip for sandbox sessions
     const watcher = getDepositWatcher();
-    if (watcher?.isActive()) {
+    if (!session.isSandbox && watcher?.isActive()) {
       watcher.watch({
         sessionId: updatedSession.id,
         type: updatedSession.type,

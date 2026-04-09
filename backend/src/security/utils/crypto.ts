@@ -21,9 +21,10 @@ export function generateUUID(): string {
 /**
  * Generate an API key pair (public key ID and secret key)
  */
-export function generateApiKeyPair(): { keyId: string; secretKey: string } {
-  const keyId = `pk_${generateSecureToken(16)}`;
-  const secretKey = `sk_${generateSecureToken(32)}`;
+export function generateApiKeyPair(isSandbox = false): { keyId: string; secretKey: string } {
+  const env = isSandbox ? 'test' : 'live';
+  const keyId = `pk_${env}_${generateSecureToken(16)}`;
+  const secretKey = `sk_${env}_${generateSecureToken(32)}`;
   return { keyId, secretKey };
 }
 

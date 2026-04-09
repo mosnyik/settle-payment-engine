@@ -14,6 +14,7 @@ import authRoutes from './auth.routes';
 import meRoutes from './me.routes';
 import historyRoutes from './history.routes';
 import webhookRoutes from './webhook.routes';
+import sandboxRoutes from './sandbox.routes';
 import {
   deprecateTransferRoutes,
   deprecateGiftRoutes,
@@ -63,5 +64,8 @@ router.use('/me', meRoutes);
 
 // Unified transaction history (legacy + payment engine)
 router.use('/history', historyRoutes);
+
+// Sandbox routes — only usable by pk_test_ API keys
+router.use('/sandbox', sandboxRoutes);
 
 export default router;

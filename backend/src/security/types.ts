@@ -37,6 +37,8 @@ export interface ApiKey {
   parentWalletTron: string | null;
   /** Per-chain confirmation threshold overrides, e.g. {"bitcoin":6,"tron":30} */
   confirmationThresholds: Partial<Record<string, number>> | null;
+  /** Sandbox/testnet key — skips real blockchain watching and real settlement */
+  isSandbox: boolean;
 }
 
 export interface CreateApiKeyInput {
@@ -52,6 +54,8 @@ export interface CreateApiKeyInput {
   settlementMode?: 'mongoro' | 'paystack' | 'self';
   /** Per-chain confirmation threshold overrides, e.g. {"bitcoin":6,"tron":30} */
   confirmationThresholds?: Partial<Record<string, number>>;
+  /** Create as sandbox/testnet key — skips real blockchain watching and real settlement */
+  isSandbox?: boolean;
 }
 
 export interface ApiKeyWithSecret {

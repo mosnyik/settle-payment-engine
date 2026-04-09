@@ -94,6 +94,8 @@ export interface CreatePaymentInput {
   parentWallet?: string; // Chain-specific parent wallet address for sweep destination
   /** Per-key confirmation threshold overrides — populated from api_keys.confirmation_thresholds */
   confirmationThresholds?: Partial<Record<string, number>>;
+  /** Sandbox mode — skips real watcher and real settlement */
+  isSandbox?: boolean;
 }
 
 // =============================================================================
@@ -145,6 +147,8 @@ export interface PaymentSession {
   metadata?: Record<string, unknown>;
   /** Bank's own internal transaction reference (bank_confirmation type only) */
   bankRef?: string;
+  /** True if session was created with a sandbox API key */
+  isSandbox?: boolean;
 }
 
 // =============================================================================

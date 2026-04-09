@@ -48,6 +48,7 @@ interface SessionRow extends RowDataPacket {
   fiat_currency: string;
   receiver_id: number | null;
   api_key_id: number | null;
+  is_sandbox: boolean;
   settlement_token: string | null;
   settlement_token_expires_at: Date | null;
 }
@@ -91,6 +92,16 @@ export class SettlementService {
     const session = await this.getSession(sessionId);
     if (!session) {
       console.error(`[Settlement] Session not found: ${sessionId}`);
+      return;
+    }
+
+    // Sandbox short-circuit — skip all real I/O and auto-complete the settlement
+    if (Boolean(session.is_sandbox)) {
+      console.log(`[Settlement] Sandbox session ${session.reference} — auto-completing settlement`);
+      await this.updateSessionStatus(sessionId, 'settling');
+      await this.markSessionSettled(sessionId);
+      sendPaymentWebhook(sessionId, 'payment.settling').catch(() => {});
+      sendPaymentWebhook(sessionId, 'payment.settled').catch(() => {});
       return;
     }
 
@@ -591,7 +602,7 @@ export class SettlementService {
 
   private async getSession(sessionId: string): Promise<SessionRow | null> {
     const [rows] = await pool.execute<SessionRow[]>(
-      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id, api_key_id
+      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id, api_key_id, is_sandbox
        FROM payment_sessions WHERE id = ?`,
       [sessionId]
     );

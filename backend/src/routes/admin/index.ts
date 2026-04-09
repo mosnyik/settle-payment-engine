@@ -3,6 +3,7 @@ import { adminAuth } from '../../security/middleware/adminAuth';
 import apiKeyRoutes from './apiKey.routes';
 import paymentRoutes from './payments.routes';
 import auditLogRoutes from './auditLog.routes';
+import reportsRoutes from './reports.routes';
 
 const router = Router();
 
@@ -13,5 +14,6 @@ router.use(adminAuth);
 router.use('/api-keys', apiKeyRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/audit-logs', auditLogRoutes);
+router.use('/reports', reportsRoutes);
 
 export default router;

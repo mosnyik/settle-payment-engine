@@ -71,6 +71,8 @@ Show `accountName` and `bankName` to the user for confirmation before proceeding
 
 #### Step 3 — Create the payment
 
+> **Recording a manually-settled transfer?** Pass `autoSettle: true` with optional `txHash` and `settlementReference` to insert the record directly as `settled` on a live key — no deposit watcher, no fiat transfer initiated. On sandbox keys, `autoSettle` simulates the full lifecycle instead.
+
 Pass `bankCode` and `accountNumber` only. The server re-resolves account details via NUBAN.
 
 **Fiat-first** (deliver a specific NGN amount):
@@ -514,6 +516,75 @@ Content-Type: application/json
 
 The deposit watcher detects the transaction automatically. Once confirmed, settlement fires and NGN is sent to the receiver's bank account. Poll `GET /v1/payments/2S-RQ7YNM` until status is `settled`.
 
+## Sandbox Mode
+
+Sandbox API keys let you test integrations end-to-end without real crypto or real fiat payouts. Create one via the admin API:
+
+```http
+POST /v1/admin/api-keys
+Authorization: Bearer <ADMIN_SECRET>
+Content-Type: application/json
+
+{
+  "merchantId": "test-merchant",
+  "name": "My Sandbox Key",
+  "isSandbox": true,
+  "tier": "standard"
+}
+```
+
+The response includes `publicKey` (`pk_test_...`) and `secretKey` (`sk_test_...`). Use these exactly like a live key for all HMAC-authenticated requests.
+
+### Key differences vs live keys
+
+| Behaviour | Sandbox | Live |
+|-----------|---------|------|
+| Key prefix | `pk_test_` / `sk_test_` | `pk_live_` / `sk_live_` |
+| Deposit watcher | Skipped | Active |
+| Settlement | Short-circuits to `settled` instantly | Paystack / Mongoro / self |
+| NUBAN lookup | Returns placeholder `Sandbox Account` | Real NUBAN API call |
+| `/v1/sandbox/*` endpoints | Enabled | 403 Forbidden |
+| `autoSettle: true` | Simulates full lifecycle (pending → settled) | Records directly as `settled` |
+
+### Simulate a deposit
+
+After creating any payment with a sandbox key, trigger the full lifecycle without sending real crypto:
+
+```http
+POST /v1/sandbox/payments/2S-XXXXXX/simulate-deposit
+X-API-Key: pk_test_xxxxx
+X-Timestamp: <unix ms>
+X-Signature: <hmac>
+Content-Type: application/json
+
+{
+  "amount": 31.2658,
+  "steps": "settled"
+}
+```
+
+```json
+{
+  "status": true,
+  "message": "Deposit simulated — payment settled",
+  "data": {
+    "reference": "2S-XXXXXX",
+    "status": "settled",
+    "txHash": "sandbox_a3f1c2...",
+    "receivedAmount": 31.2658
+  }
+}
+```
+
+**Body fields (all optional):**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `amount` | number | session's `cryptoAmount` | Override received amount — test underpayment scenarios |
+| `steps` | `"confirming"` \| `"confirmed"` \| `"settled"` | `"settled"` | Stop at a specific lifecycle stage |
+
+Webhooks fire at each step exactly as they would for a real payment.
+
 ## Reconciliation Reports
 
 Download end-of-day settlement statements as CSV or JSON.
@@ -579,12 +650,14 @@ A summary row with totals (fiat volume, charges, net fiat, USD volume) is append
 ## Features
 
 - **Five Transaction Types** - Transfer, Gift, Request, Merchant checkout, Bank confirmation rail
+- **Sandbox / Testnet Mode** - `pk_test_` keys with simulate-deposit endpoint for end-to-end testing without real crypto
 - **Rate Locking** - Freeze exchange rates during payment window
 - **HD Wallet Derivation** - BIP32/44/84, unlimited unique deposit addresses
 - **Tiered Fees** - Configurable fee tiers based on transaction amount
 - **Multi-Chain** - Support for BTC, ETH, BNB, TRX, USDT and USDC (ERC20/BEP20/TRC20)
 - **State Machine** - Valid status transitions enforced per transaction type
 - **Multi-Provider Settlement** - Paystack (default), Mongoro, or self-settlement
+- **Manual Record Import** - `autoSettle: true` inserts live transfers directly as `settled` for external bookkeeping
 - **Reconciliation Reports** - End-of-day CSV/JSON exports for banks and merchants
 - **WaaS** - Wallet-as-a-Service: provision monitored deposit addresses for external platforms
 

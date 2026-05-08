@@ -71,7 +71,7 @@ export async function updateRateJob(rateId: number = 1): Promise<RateUpdateResul
 
   const [result] = await pool.execute<ResultSetHeader>(
     `UPDATE rates
-     SET current_rate = ?, merchant_rate = ?, update_at = NOW()
+     SET current_rate = ?, merchant_rate = ?, update_at = UTC_TIMESTAMP() + INTERVAL 1 HOUR
      WHERE id = ?`,
     [currentRate, merchantRate, rateId]
   );

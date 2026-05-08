@@ -792,6 +792,37 @@ const DEFAULT_CONFIG = {
 };
 ```
 
+## Utility Scripts
+
+### Generate Paid Gifts
+
+Use the gift generator to create paid gift records directly in the database. The script inserts into both `gifts` and `summaries`, marking the gift as paid on creation.
+
+Dry run:
+
+```bash
+pnpm run generate:gift-ids -- --count 10 --amount 5000 --db settle_db_test --host 127.0.0.1 --port 3306 --user root --password mosnyik
+```
+
+Apply changes:
+
+```bash
+pnpm run generate:gift-ids -- --count 10 --amount 5000 --db settle_db_test --host 127.0.0.1 --port 3306 --user root --password mosnyik --apply
+```
+
+Arguments:
+- `--count` number of gifts to create
+- `--amount` naira amount for each gift
+- `--total-dollar` dollar value to store in `summaries` for each gift. Defaults to the same value as `--amount`
+- `--db` database name
+- `--host` database host
+- `--port` database port
+- `--user` database user
+- `--password` database password
+- `--apply` actually writes to the database. Without this flag, the script only previews generated gift IDs
+
+`pnpm` is the preferred command here because this repo already uses `pnpm`, but `npm run generate:gift-ids -- ...` also works.
+
 ## Testing
 
 ```bash

@@ -467,8 +467,8 @@ export class HDWalletService {
       let num = BigInt('0x' + withChecksum.toString('hex'));
       let address = '';
       while (num > 0n) {
-        address = BASE58[Number(num % 62n)] + address;
-        num /= 62n;
+        address = BASE58[Number(num % 58n)] + address;
+        num /= 58n;
       }
       // Pad leading 1s for zero bytes
       for (const byte of withChecksum) {

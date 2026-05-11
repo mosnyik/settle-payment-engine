@@ -2,10 +2,15 @@
  * Rate Service
  */
 
-import axios from 'axios';
-import { CryptoCurrency, FiatCurrency, RateLock, DEFAULT_CONFIG } from '../types';
-import { RateServiceUnavailableError } from '../errors';
-import config from '../../../config';
+import axios from "axios";
+import {
+  CryptoCurrency,
+  FiatCurrency,
+  RateLock,
+  DEFAULT_CONFIG,
+} from "../types";
+import { RateServiceUnavailableError } from "../errors";
+import config from "../../../config";
 
 interface RateData {
   exchangeRate: number;
@@ -26,7 +31,8 @@ interface CacheEntry<T> {
 
 class RateCache {
   private exchangeRateCache: CacheEntry<RateData> | null = null;
-  private assetPriceCache: Map<CryptoCurrency, CacheEntry<AssetPrice>> = new Map();
+  private assetPriceCache: Map<CryptoCurrency, CacheEntry<AssetPrice>> =
+    new Map();
   private readonly TTL_MS = 60 * 1000;
 
   getExchangeRate(): RateData | null {
@@ -70,24 +76,30 @@ class RateCache {
 
 const cache = new RateCache();
 
-async function fetchExchangeRateFromDb(fiatCurrency: FiatCurrency): Promise<RateData> {
-  if (fiatCurrency !== 'NGN') {
-    throw new RateServiceUnavailableError(`Currency ${fiatCurrency} not supported yet`);
+let adjustedRate: number;
+
+async function fetchExchangeRateFromDb(
+  fiatCurrency: FiatCurrency,
+): Promise<RateData> {
+  if (fiatCurrency !== "NGN") {
+    throw new RateServiceUnavailableError(
+      `Currency ${fiatCurrency} not supported yet`,
+    );
   }
 
   try {
-    const pool = (await import('../../../lib/mysql')).default;
-    const [rows] = await pool.execute<any[]>('SELECT * FROM rates LIMIT 1');
+    const pool = (await import("../../../lib/mysql")).default;
+    const [rows] = await pool.execute<any[]>("SELECT * FROM rates LIMIT 1");
 
     if (!rows || rows.length === 0) {
-      throw new RateServiceUnavailableError('No rates found in database');
+      throw new RateServiceUnavailableError("No rates found in database");
     }
 
     const rateRow = rows[0];
 
     const parseRate = (value: string | number): number => {
-      if (typeof value === 'number') return value;
-      return parseFloat(value.toString().replace(/,/g, ''));
+      if (typeof value === "number") return value;
+      return parseFloat(value.toString().replace(/,/g, ""));
     };
 
     const currentRate = parseRate(rateRow.current_rate);
@@ -97,7 +109,7 @@ async function fetchExchangeRateFromDb(fiatCurrency: FiatCurrency): Promise<Rate
     // Apply 0.8% adjustment
     const percentage = 0.8;
     const adjustment = (percentage / 100) * currentRate;
-    const adjustedRate = currentRate - adjustment;
+    adjustedRate = currentRate - adjustment;
 
     return {
       exchangeRate: adjustedRate,
@@ -109,31 +121,33 @@ async function fetchExchangeRateFromDb(fiatCurrency: FiatCurrency): Promise<Rate
       throw error;
     }
     throw new RateServiceUnavailableError(
-      'Failed to fetch exchange rate',
-      error instanceof Error ? error : undefined
+      "Failed to fetch exchange rate",
+      error instanceof Error ? error : undefined,
     );
   }
 }
 
-async function fetchAssetPriceFromApi(crypto: CryptoCurrency): Promise<AssetPrice> {
+async function fetchAssetPriceFromApi(
+  crypto: CryptoCurrency,
+): Promise<AssetPrice> {
   try {
-    if (crypto === 'USDT') {
+    if (crypto === "USDT") {
       return {
-        symbol: 'USDT',
-        priceUsd: 1.0,
+        symbol: "USDT",
+        priceUsd: adjustedRate,
         fetchedAt: new Date(),
       };
     }
 
     const response = await axios.get(
-      'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest',
+      "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest",
       {
         params: { symbol: crypto },
         headers: {
-          'X-CMC_PRO_API_KEY': config.coinmarketcap.apiKey,
+          "X-CMC_PRO_API_KEY": config.coinmarketcap.apiKey,
         },
         timeout: 10000,
-      }
+      },
     );
 
     const priceUsd = response.data.data[crypto].quote.USD.price;
@@ -146,12 +160,14 @@ async function fetchAssetPriceFromApi(crypto: CryptoCurrency): Promise<AssetPric
   } catch (error) {
     throw new RateServiceUnavailableError(
       `Failed to fetch ${crypto} price`,
-      error instanceof Error ? error : undefined
+      error instanceof Error ? error : undefined,
     );
   }
 }
 
-export async function getExchangeRate(fiatCurrency: FiatCurrency = 'NGN'): Promise<RateData> {
+export async function getExchangeRate(
+  fiatCurrency: FiatCurrency = "NGN",
+): Promise<RateData> {
   const cached = cache.getExchangeRate();
   if (cached) {
     return cached;
@@ -177,8 +193,8 @@ export async function getAssetPrice(crypto: CryptoCurrency): Promise<number> {
 
 export async function lockRate(
   crypto: CryptoCurrency,
-  fiatCurrency: FiatCurrency = 'NGN',
-  ttlMinutes: number = DEFAULT_CONFIG.rateLockTtlMinutes
+  fiatCurrency: FiatCurrency = "NGN",
+  ttlMinutes: number = DEFAULT_CONFIG.rateLockTtlMinutes,
 ): Promise<RateLock> {
   const [rateData, assetPrice] = await Promise.all([
     getExchangeRate(fiatCurrency),

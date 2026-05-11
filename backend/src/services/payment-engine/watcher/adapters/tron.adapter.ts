@@ -35,6 +35,8 @@ interface TronGridTx {
           owner_address: string;
           to_address: string;
           amount?: number;
+          contract_address?: string;
+          data?: string;
         };
       };
       type: string;
@@ -76,6 +78,20 @@ interface TronGridBlockResponse {
       timestamp: number;
     };
   };
+}
+
+interface TronGridTxInfo {
+  id?: string;
+  blockNumber?: number;
+  blockTimeStamp?: number;
+  receipt?: {
+    result?: string;
+  };
+  log?: Array<{
+    address?: string;
+    topics?: string[];
+    data?: string;
+  }>;
 }
 
 // =============================================================================
@@ -218,13 +234,38 @@ export class TronAdapter extends ChainAdapter {
       }
 
       const tx = response.data as TronGridTx;
+      await this.enforceRateLimit();
+
+      const infoResponse = await this.client.get<TronGridTxInfo | { Error?: string }>(
+        `/wallet/gettransactioninfobyid`,
+        {
+          params: {
+            value: txHash,
+          },
+        }
+      );
+
+      const txInfo =
+        infoResponse.data && !('Error' in infoResponse.data)
+          ? infoResponse.data as TronGridTxInfo
+          : null;
       const currentBlock = await this.getCurrentBlockNumber();
+      const contract = tx.raw_data.contract[0];
+      const contractType = contract?.type;
+
+      if (contractType === 'TriggerSmartContract') {
+        return this.mapTrc20ConfirmedTx(tx, txInfo, currentBlock);
+      }
 
       // Get recipient from contract data
-      const contract = tx.raw_data.contract[0];
-      const toAddress = contract?.parameter?.value?.to_address || '';
+      const toAddress = this.hexToBase58(contract?.parameter?.value?.to_address || '');
 
-      return this.mapNativeTx(tx, this.hexToBase58(toAddress), currentBlock);
+      return this.mapNativeTx(
+        tx,
+        toAddress,
+        currentBlock,
+        txInfo?.blockNumber
+      );
     } catch (error) {
       if (this.isNotFoundError(error)) {
         return null;
@@ -293,13 +334,14 @@ export class TronAdapter extends ChainAdapter {
   private mapNativeTx(
     tx: TronGridTx,
     toAddress: string,
-    currentBlock: number
+    currentBlock: number,
+    confirmedBlockNumber?: number
   ): ChainTransaction {
     const contract = tx.raw_data.contract[0];
     const amountSun = contract?.parameter?.value?.amount || 0;
     const amountTrx = amountSun / 1_000_000;
 
-    const blockNumber = tx.blockNumber;
+    const blockNumber = confirmedBlockNumber ?? tx.blockNumber;
     const confirmations = currentBlock - blockNumber + 1;
 
     // Convert hex addresses to base58 for display
@@ -317,6 +359,56 @@ export class TronAdapter extends ChainAdapter {
       blockTime: Math.floor(tx.block_timestamp / 1000),
       isConfirmed: confirmations >= this.getRequiredConfirmations(),
       status: this.isSuccessfulTx(tx) ? 'confirmed' : 'failed',
+    };
+  }
+
+  /**
+   * Map a confirmed TRC20 transaction to ChainTransaction.
+   */
+  private mapTrc20ConfirmedTx(
+    tx: TronGridTx,
+    txInfo: TronGridTxInfo | null,
+    currentBlock: number
+  ): ChainTransaction {
+    const contract = tx.raw_data.contract[0];
+    const ownerAddress = this.hexToBase58(contract?.parameter?.value?.owner_address || '');
+    const tokenAddress = this.hexToBase58(contract?.parameter?.value?.contract_address || '');
+    const callData = this.stripHexPrefix(contract?.parameter?.value?.data || '');
+    const transferLog = txInfo?.log?.find((log) => {
+      if (!log.address) return false;
+      return this.hexToBase58(log.address).toLowerCase() === tokenAddress.toLowerCase();
+    });
+
+    const parsedCall = this.parseTrc20TransferData(callData);
+    const toAddress = transferLog?.topics?.[2]
+      ? this.topicToBase58Address(transferLog.topics[2])
+      : parsedCall?.toAddress || '';
+    const amountRaw = transferLog?.data
+      ? BigInt(`0x${this.stripHexPrefix(transferLog.data) || '0'}`)
+      : parsedCall?.amountRaw ?? 0n;
+    const tokenSymbol = tokenAddress === VERIFIED_TOKENS.tron.USDT ? 'USDT' : undefined;
+    const tokenDecimals = tokenAddress === VERIFIED_TOKENS.tron.USDT ? 6 : undefined;
+    const amountDecimal = tokenDecimals !== undefined
+      ? Number(amountRaw) / Math.pow(10, tokenDecimals)
+      : 0;
+    const blockNumber = txInfo?.blockNumber ?? currentBlock;
+    const confirmations = currentBlock - blockNumber + 1;
+    const status = txInfo?.receipt?.result === 'SUCCESS' ? 'confirmed' : 'failed';
+
+    return {
+      txHash: tx.txID,
+      from: ownerAddress,
+      to: toAddress,
+      amount: amountRaw.toString(),
+      amountDecimal,
+      confirmations,
+      blockNumber,
+      blockTime: Math.floor((txInfo?.blockTimeStamp ?? tx.block_timestamp) / 1000),
+      tokenAddress,
+      tokenSymbol,
+      tokenDecimals,
+      isConfirmed: confirmations >= this.getRequiredConfirmations(),
+      status,
     };
   }
 
@@ -365,9 +457,61 @@ export class TronAdapter extends ChainAdapter {
       return hexAddress;
     }
 
-    // For hex addresses, we'd need to do a proper conversion
-    // For now, return the hex address (TronGrid usually returns base58)
-    return hexAddress;
+    const normalized = this.stripHexPrefix(hexAddress).toLowerCase();
+    if (!normalized) return '';
+
+    const withPrefix = normalized.startsWith('41')
+      ? normalized
+      : `41${normalized.slice(-40)}`;
+    const payload = Buffer.from(withPrefix, 'hex');
+    const checksum = this.doubleSha256(payload).subarray(0, 4);
+    const full = Buffer.concat([payload, checksum]);
+
+    let num = BigInt(`0x${full.toString('hex')}`);
+    let result = '';
+    const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+    while (num > 0n) {
+      result = alphabet[Number(num % 58n)] + result;
+      num /= 58n;
+    }
+
+    for (const byte of full) {
+      if (byte !== 0) break;
+      result = '1' + result;
+    }
+
+    return result;
+  }
+
+  private topicToBase58Address(topic: string): string {
+    const normalized = this.stripHexPrefix(topic);
+    return this.hexToBase58(`41${normalized.slice(-40)}`);
+  }
+
+  private parseTrc20TransferData(data: string): { toAddress: string; amountRaw: bigint } | null {
+    // transfer(address,uint256)
+    if (!data || data.length < 8 + 64 + 64 || !data.startsWith('a9059cbb')) {
+      return null;
+    }
+
+    const toWord = data.slice(8, 72);
+    const amountWord = data.slice(72, 136);
+
+    return {
+      toAddress: this.hexToBase58(`41${toWord.slice(-40)}`),
+      amountRaw: BigInt(`0x${amountWord}`),
+    };
+  }
+
+  private stripHexPrefix(value: string): string {
+    return value.startsWith('0x') ? value.slice(2) : value;
+  }
+
+  private doubleSha256(data: Uint8Array): Buffer {
+    const { createHash } = require('crypto');
+    const hash1 = createHash('sha256').update(data).digest();
+    return createHash('sha256').update(hash1).digest();
   }
 
   /**

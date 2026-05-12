@@ -21,10 +21,24 @@ const router = Router();
 
 const confirmationThresholdsSchema = z
   .record(z.number().int().positive())
-  .refine(
-    (val) => Object.keys(val).every((k) => ['bitcoin', 'ethereum', 'bsc', 'tron'].includes(k)),
-    { message: 'confirmationThresholds keys must be: bitcoin, ethereum, bsc, or tron' }
-  )
+  .superRefine((val, ctx) => {
+    for (const [key, value] of Object.entries(val)) {
+      if (!['bitcoin', 'ethereum', 'bsc', 'tron'].includes(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'confirmationThresholds keys must be: bitcoin, ethereum, bsc, or tron',
+          path: [key],
+        });
+      }
+      if (key === 'bitcoin' && (value < 2 || value > 144)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'bitcoin confirmation threshold must be between 2 and 144',
+          path: [key],
+        });
+      }
+    }
+  })
   .nullable()
   .optional();
 

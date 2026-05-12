@@ -219,6 +219,52 @@ export class SessionRepository {
     }
   }
 
+  async findResumableWatcherSessions(limit: number = 500): Promise<PaymentSession[]> {
+    const pool = (await import('../../../lib/mysql')).default;
+
+    try {
+      const [rows] = await pool.query<any[]>(
+        `SELECT * FROM payment_sessions
+         WHERE is_sandbox = 0
+           AND deposit_address IS NOT NULL
+           AND network IS NOT NULL
+           AND crypto IS NOT NULL
+           AND crypto_amount IS NOT NULL
+           AND (
+             (status = 'pending' AND expires_at > NOW())
+             OR (status = 'confirming' AND tx_hash IS NOT NULL)
+           )
+         ORDER BY created_at ASC
+         LIMIT ?`,
+        [limit]
+      );
+
+      return (rows || []).map(rowToSession);
+    } catch (error) {
+      throw new DatabaseError('find resumable watcher sessions', error instanceof Error ? error : undefined);
+    }
+  }
+
+  async findConfirmedAwaitingSettlement(limit: number = 500): Promise<PaymentSession[]> {
+    const pool = (await import('../../../lib/mysql')).default;
+
+    try {
+      const [rows] = await pool.query<any[]>(
+        `SELECT * FROM payment_sessions
+         WHERE is_sandbox = 0
+           AND status = 'confirmed'
+           AND type IN ('transfer', 'request')
+         ORDER BY confirmed_at ASC, updated_at ASC
+         LIMIT ?`,
+        [limit]
+      );
+
+      return (rows || []).map(rowToSession);
+    } catch (error) {
+      throw new DatabaseError('find confirmed sessions awaiting settlement', error instanceof Error ? error : undefined);
+    }
+  }
+
   async findExpiredPending(limit: number = 100): Promise<PaymentSession[]> {
     const pool = (await import('../../../lib/mysql')).default;
     const now = new Date();

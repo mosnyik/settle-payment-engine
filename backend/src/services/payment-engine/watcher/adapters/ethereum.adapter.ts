@@ -8,7 +8,7 @@
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import { ChainAdapter, GetTransactionsOptions } from './chain-adapter';
+import { ChainAdapter, GetTransactionOptions, GetTransactionsOptions } from './chain-adapter';
 import {
   ChainTransaction,
   ChainWatcherConfig,
@@ -238,7 +238,10 @@ export class EthereumAdapter extends ChainAdapter {
   /**
    * Get a specific transaction by hash.
    */
-  async getTransaction(txHash: string): Promise<ChainTransaction | null> {
+  async getTransaction(
+    txHash: string,
+    options?: GetTransactionOptions
+  ): Promise<ChainTransaction | null> {
     await this.enforceRateLimit();
 
     try {
@@ -282,6 +285,27 @@ export class EthereumAdapter extends ChainAdapter {
       if (!tx) return null;
 
       const currentBlock = await this.getCurrentBlockNumber();
+
+      if (options?.address) {
+        const addressTxs = options.tokenAddress
+          ? await this.getTokenTransactions(
+              options.address,
+              options.tokenAddress,
+              currentBlock,
+              25
+            )
+          : [
+              ...(await this.getNormalTransactions(options.address, currentBlock, 25)),
+              ...(await this.getInternalTransactions(options.address, currentBlock, 25)),
+            ];
+
+        const matchedTx = addressTxs.find(
+          (candidate) => candidate.txHash.toLowerCase() === txHash.toLowerCase()
+        );
+        if (matchedTx) return matchedTx;
+        return null;
+      }
+
       const blockNumber = parseInt(tx.blockNumber, 16);
       const confirmations = currentBlock - blockNumber + 1;
       const amountWei = BigInt(tx.value);

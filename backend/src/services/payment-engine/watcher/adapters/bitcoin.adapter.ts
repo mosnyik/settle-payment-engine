@@ -8,7 +8,7 @@
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import { ChainAdapter, GetTransactionsOptions } from './chain-adapter';
+import { ChainAdapter, GetTransactionOptions, GetTransactionsOptions } from './chain-adapter';
 import { ChainTransaction, ChainWatcherConfig } from '../types';
 
 // =============================================================================
@@ -100,7 +100,10 @@ export class BitcoinAdapter extends ChainAdapter {
   /**
    * Get a specific transaction by hash.
    */
-  async getTransaction(txHash: string): Promise<ChainTransaction | null> {
+  async getTransaction(
+    txHash: string,
+    options?: GetTransactionOptions
+  ): Promise<ChainTransaction | null> {
     await this.enforceRateLimit();
 
     try {
@@ -108,11 +111,17 @@ export class BitcoinAdapter extends ChainAdapter {
       const tx = response.data;
       const currentBlock = await this.getCurrentBlockNumber();
 
-      // Find the primary recipient (first non-change output)
-      const recipientOutput = tx.vout.find((o) => o.scriptpubkey_address);
-      const toAddress = recipientOutput?.scriptpubkey_address || '';
+      const toAddress =
+        options?.address ||
+        tx.vout.find((o) => o.scriptpubkey_address)?.scriptpubkey_address ||
+        '';
 
-      return this.mapTransaction(tx, toAddress, currentBlock);
+      const mapped = this.mapTransaction(tx, toAddress, currentBlock);
+      if (options?.address && mapped.amountDecimal <= 0) {
+        return null;
+      }
+
+      return mapped;
     } catch (error) {
       if (this.isNotFoundError(error)) {
         return null;

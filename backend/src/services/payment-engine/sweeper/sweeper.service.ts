@@ -54,6 +54,7 @@ export class SweeperService {
   private config: SweeperConfig;
   private sweepers: Map<string, ChainSweeper> = new Map();
   private isInitialized: boolean = false;
+  private retryTimer: NodeJS.Timeout | null = null;
 
   constructor(config: SweeperConfig) {
     this.config = config;
@@ -84,6 +85,23 @@ export class SweeperService {
 
     this.isInitialized = true;
     console.log('[Sweeper] Initialized with chains:', Array.from(this.sweepers.keys()).join(', '));
+
+    this.retryFailedSweeps().catch((err) => {
+      console.error('[Sweeper] Initial failed sweep retry pass failed:', err.message);
+    });
+    this.retryTimer = setInterval(() => {
+      this.retryFailedSweeps().catch((err) => {
+        console.error('[Sweeper] Failed sweep retry pass failed:', err.message);
+      });
+    }, 60000);
+  }
+
+  stop(): void {
+    if (this.retryTimer) {
+      clearInterval(this.retryTimer);
+      this.retryTimer = null;
+    }
+    this.isInitialized = false;
   }
 
   /**
@@ -268,6 +286,27 @@ export class SweeperService {
     ) as [any[], any];
 
     return (rows || []).map(this.rowToSweepRecord);
+  }
+
+  /**
+   * Retry failed sweeps that are still within retry limits.
+   */
+  async retryFailedSweeps(): Promise<number> {
+    const sweeps = await this.getRetryableSweeps();
+    let retried = 0;
+
+    for (const sweep of sweeps) {
+      const result = await this.retrySweep(sweep.id);
+      retried++;
+
+      if (result.success) {
+        console.log(`[Sweeper] Retry succeeded for sweep ${sweep.id}: ${result.txHash}`);
+      } else {
+        console.warn(`[Sweeper] Retry failed for sweep ${sweep.id}: ${result.error}`);
+      }
+    }
+
+    return retried;
   }
 
   /**
@@ -627,5 +666,6 @@ export async function createSweeperService(config: SweeperConfig): Promise<Sweep
  * Destroy the sweeper service instance.
  */
 export function destroySweeperService(): void {
+  sweeperInstance?.stop();
   sweeperInstance = null;
 }

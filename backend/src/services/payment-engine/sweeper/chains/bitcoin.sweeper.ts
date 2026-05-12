@@ -7,6 +7,7 @@
 
 import axios from 'axios';
 import * as btc from '@scure/btc-signer';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { ChainSweeper, ChainSweepParams, SweepResult } from '../types';
 
 const BLOCKSTREAM_API = 'https://blockstream.info/api';
@@ -63,7 +64,8 @@ export class BitcoinSweeper implements ChainSweeper {
 
       // Build transaction
       const privateKey = Buffer.from(params.privateKey, 'hex');
-      const tx = this.buildTransaction(utxos, params.toAddress, sendSats, privateKey);
+      const publicKey = secp256k1.getPublicKey(privateKey, true);
+      const tx = this.buildTransaction(utxos, params.toAddress, sendSats, privateKey, publicKey);
 
       // Broadcast
       const txHash = await this.broadcastTransaction(tx);
@@ -154,14 +156,15 @@ export class BitcoinSweeper implements ChainSweeper {
     utxos: UTXO[],
     toAddress: string,
     sendSats: number,
-    privateKey: Uint8Array
+    privateKey: Uint8Array,
+    publicKey: Uint8Array
   ): string {
     // Create transaction using @scure/btc-signer
     const inputs = utxos.map(utxo => ({
       txid: utxo.txid,
       index: utxo.vout,
       witnessUtxo: {
-        script: btc.p2wpkh(btc.utils.pubSchnorr(privateKey)).script,
+        script: btc.p2wpkh(publicKey).script,
         amount: BigInt(utxo.value),
       },
     }));

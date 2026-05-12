@@ -97,11 +97,31 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
   };
 }
 
+function validateConfirmationThresholds(
+  thresholds?: Partial<Record<string, number>> | null
+): void {
+  if (!thresholds) return;
+
+  for (const [chain, value] of Object.entries(thresholds)) {
+    if (!['bitcoin', 'ethereum', 'bsc', 'tron'].includes(chain)) {
+      throw new Error(`Invalid confirmation threshold chain: ${chain}`);
+    }
+    if (value === undefined || !Number.isInteger(value) || value <= 0) {
+      throw new Error(`Invalid confirmation threshold for ${chain}`);
+    }
+    if (chain === 'bitcoin' && (value < 2 || value > 144)) {
+      throw new Error('Bitcoin confirmation threshold must be between 2 and 144');
+    }
+  }
+}
+
 /**
  * Create a new API key for a merchant
  * Returns the secret key only once - it cannot be retrieved later
  */
 export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWithSecret & { webhookSecret?: string }> {
+  validateConfirmationThresholds(input.confirmationThresholds);
+
   const { keyId, secretKey } = generateApiKeyPair(input.isSandbox ?? false);
   const keyHash = sha256(secretKey);
 
@@ -311,6 +331,8 @@ export async function updateApiKey(
     confirmationThresholds?: Partial<Record<string, number>> | null;
   }
 ): Promise<ApiKey | null> {
+  validateConfirmationThresholds(updates.confirmationThresholds);
+
   const setClauses: string[] = [];
   const values: unknown[] = [];
 

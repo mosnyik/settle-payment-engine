@@ -125,6 +125,7 @@ export interface WatchedSession {
   confirmationThresholds?: Partial<Record<string, number>>;
   status: 'pending' | 'confirming';
   txHash?: string;
+  receivedAmount?: number;
   expiresAt: Date;
 }
 
@@ -234,6 +235,7 @@ export interface TransactionValidationResult {
   valid: boolean;
   reason?:
     | 'zero_confirmation'
+    | 'failed_transaction'
     | 'dust_amount'
     | 'unverified_token_contract'
     | 'rbf_insufficient_confirmations'

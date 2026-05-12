@@ -23,6 +23,16 @@ export interface GetTransactionsOptions {
 }
 
 /**
+ * Options for fetching a specific transaction.
+ */
+export interface GetTransactionOptions {
+  /** Expected recipient/deposit address. Used to disambiguate multi-output/internal txs. */
+  address?: string;
+  /** Token contract address (for ERC20/BEP20/TRC20) */
+  tokenAddress?: string;
+}
+
+/**
  * Abstract base class for blockchain adapters.
  * Each chain implements this to provide a unified interface for the watcher.
  */
@@ -66,7 +76,10 @@ export abstract class ChainAdapter {
    * Get a specific transaction by hash.
    * Used for confirmation tracking.
    */
-  abstract getTransaction(txHash: string): Promise<ChainTransaction | null>;
+  abstract getTransaction(
+    txHash: string,
+    options?: GetTransactionOptions
+  ): Promise<ChainTransaction | null>;
 
   /**
    * Get current block number.

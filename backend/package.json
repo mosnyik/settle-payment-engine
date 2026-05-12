@@ -8,6 +8,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "generate:gift-ids": "tsx scripts/generate-gift-ids.ts",
+    "recover": "tsx scripts/recover-stuck-hd-sweep.ts",
+    "recover:hd-sweep": "tsx scripts/recover-stuck-hd-sweep.ts",
     "start": "node dist/index.js",
     "update:gift-fields-by-amount": "node scripts/update-gift-fields-by-amount.js",
     "lint": "eslint src --ext .ts",

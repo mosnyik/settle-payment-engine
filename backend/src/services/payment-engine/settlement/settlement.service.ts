@@ -166,6 +166,17 @@ export class SettlementService {
       const balanceResult = await this.paystack.getBalance();
       if (balanceResult.success && balanceResult.balance !== undefined) {
         if (balanceResult.balance < session.fiat_amount) {
+          await this.createSettlementAttempt({
+            sessionId,
+            provider: 'paystack',
+            status: 'failed',
+            amount: session.fiat_amount,
+            accountNumber: receiver.accountNumber,
+            bankCode: receiver.bankCode,
+            accountName: receiver.accountName,
+            errorMessage: `Insufficient Paystack balance: ${balanceResult.balance}`,
+          });
+
           // Balance won't cover this payment — alert and leave in settling for manual resolution
           await this.telegram.sendPaystackInsufficientBalanceAlert(
             { reference: session.reference, fiatAmount: session.fiat_amount, fiatCurrency: session.fiat_currency },

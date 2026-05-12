@@ -104,8 +104,8 @@ async function fetchExchangeRateFromDb(
     const merchantRate = parseRate(rateRow.merchant_rate || 0);
     const profitRate = parseRate(rateRow.profit_rate || 0);
 
-    // Apply 0.8% adjustment
-    const percentage = 0.8;
+    // Apply 1% adjustment
+    const percentage = 1;
     const adjustment = (percentage / 100) * currentRate;
     const adjustedRate = currentRate - adjustment;
 

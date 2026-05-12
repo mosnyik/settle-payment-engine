@@ -202,7 +202,9 @@ describe('SessionManager', () => {
       expect(calculateCharges).toHaveBeenCalledWith(
         50000,
         'USDT',
-        expect.objectContaining({ rate: 1600 })
+        expect.objectContaining({ rate: 1600 }),
+        undefined,
+        'crypto'
       );
     });
 

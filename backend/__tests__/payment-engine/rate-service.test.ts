@@ -101,7 +101,7 @@ describe('Rate Service', () => {
 
       const lock = await lockRate('USDT', 'NGN');
 
-      expect(lock.rate).toBeCloseTo(1587.2, 1); // 1600 - 0.8%
+      expect(lock.rate).toBeCloseTo(1584, 1); // 1600 - 1%
       expect(lock.assetPrice).toBe(1.0); // USDT is always $1
       expect(lock.lockedAt).toBeInstanceOf(Date);
       expect(lock.expiresAt).toBeInstanceOf(Date);
@@ -114,7 +114,7 @@ describe('Rate Service', () => {
 
       const lock = await lockRate('BTC', 'NGN');
 
-      expect(lock.rate).toBeCloseTo(1587.2, 1);
+      expect(lock.rate).toBeCloseTo(1584, 1);
       expect(lock.assetPrice).toBe(95000);
     });
 
@@ -124,7 +124,7 @@ describe('Rate Service', () => {
 
       const lock = await lockRate('ETH', 'NGN');
 
-      expect(lock.rate).toBeCloseTo(1587.2, 1);
+      expect(lock.rate).toBeCloseTo(1584, 1);
       expect(lock.assetPrice).toBe(3500);
     });
 

@@ -12,6 +12,8 @@ import {
   fiatChargeToCrypto,
   calculateCharges,
   formatCryptoAmount,
+  getCryptoAmountDecimals,
+  roundCryptoAmount,
   formatFiatAmount,
   validateAmount,
   DEFAULT_FEE_TIERS,
@@ -267,7 +269,7 @@ describe('Charge Calculator', () => {
       expect(result.cryptoCharge).toBeCloseTo(0.3125, 6);
 
       // Total: (₦50000 / 1600) + 0.3125 = 31.25 + 0.3125 = 31.5625 USDT
-      expect(result.totalCryptoAmount).toBeCloseTo(31.5625, 4);
+      expect(result.totalCryptoAmount).toBe(31.56);
     });
 
     it('should calculate all charge components for BTC', () => {
@@ -281,7 +283,7 @@ describe('Charge Calculator', () => {
       // Net crypto: ₦50000 / 1600 / 95000 = 0.000328947 BTC
       // Crypto charge: ₦500 / 1600 / 95000 = 0.0000032895 BTC
       // Total: 0.000328947 + 0.0000032895 = 0.000332236 BTC
-      expect(result.totalCryptoAmount).toBeCloseTo(0.000332236, 8);
+      expect(result.totalCryptoAmount).toBe(0.00033224);
     });
 
     it('should use standard tier for 500,000 NGN', () => {
@@ -309,8 +311,7 @@ describe('Charge Calculator', () => {
       // Net crypto: ₦100000 / 1600 / 3500 = 0.017857 ETH
       // Crypto charge: ₦500 / 1600 / 3500 = 0.0000893 ETH
       // Total should be slightly more than net
-      expect(result.totalCryptoAmount).toBeGreaterThan(0.017857);
-      expect(result.totalCryptoAmount).toBeLessThan(0.018);
+      expect(result.totalCryptoAmount).toBe(0.01795);
     });
   });
 
@@ -319,9 +320,10 @@ describe('Charge Calculator', () => {
   // ===========================================================================
 
   describe('formatCryptoAmount', () => {
-    it('should format USDT with 4 decimals', () => {
-      expect(formatCryptoAmount(31.5625, 'USDT')).toBe('31.5625');
-      expect(formatCryptoAmount(100, 'USDT')).toBe('100.0000');
+    it('should format USDT and USDC with 2 decimals', () => {
+      expect(formatCryptoAmount(31.5625, 'USDT')).toBe('31.56');
+      expect(formatCryptoAmount(100, 'USDT')).toBe('100.00');
+      expect(formatCryptoAmount(31.5625, 'USDC')).toBe('31.56');
     });
 
     it('should format BTC with 8 decimals', () => {
@@ -329,16 +331,30 @@ describe('Charge Calculator', () => {
       expect(formatCryptoAmount(1.23456789, 'BTC')).toBe('1.23456789');
     });
 
-    it('should format ETH with 8 decimals', () => {
-      expect(formatCryptoAmount(0.017857, 'ETH')).toBe('0.01785700');
+    it('should format ETH with 5 decimals', () => {
+      expect(formatCryptoAmount(0.017857, 'ETH')).toBe('0.01786');
     });
 
-    it('should format BNB with 8 decimals', () => {
-      expect(formatCryptoAmount(0.5, 'BNB')).toBe('0.50000000');
+    it('should format BNB with 5 decimals', () => {
+      expect(formatCryptoAmount(0.5, 'BNB')).toBe('0.50000');
     });
 
-    it('should format TRX with 8 decimals', () => {
-      expect(formatCryptoAmount(125.5, 'TRX')).toBe('125.50000000');
+    it('should format TRX with 5 decimals', () => {
+      expect(formatCryptoAmount(125.5, 'TRX')).toBe('125.50000');
+    });
+
+    it('should expose payment amount decimal precision by crypto', () => {
+      expect(getCryptoAmountDecimals('USDT')).toBe(2);
+      expect(getCryptoAmountDecimals('USDC')).toBe(2);
+      expect(getCryptoAmountDecimals('BTC')).toBe(8);
+      expect(getCryptoAmountDecimals('ETH')).toBe(5);
+    });
+
+    it('should round payable crypto amounts to payment precision', () => {
+      expect(roundCryptoAmount(31.5625, 'USDT')).toBe(31.56);
+      expect(roundCryptoAmount(31.5625, 'USDC')).toBe(31.56);
+      expect(roundCryptoAmount(0.000332236, 'BTC')).toBe(0.00033224);
+      expect(roundCryptoAmount(0.01794643, 'ETH')).toBe(0.01795);
     });
   });
 

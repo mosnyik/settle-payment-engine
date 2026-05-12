@@ -44,6 +44,23 @@ export const DEFAULT_FEE_TIERS: FeeTier[] = [
   },
 ];
 
+function isStablecoin(crypto: CryptoCurrency): boolean {
+  return crypto === 'USDT' || crypto === 'USDC';
+}
+
+export function getCryptoAmountDecimals(crypto: CryptoCurrency): number {
+  if (isStablecoin(crypto)) return 2;
+  if (crypto === 'BTC') return 8;
+  return 5;
+}
+
+export function roundCryptoAmount(
+  amount: number,
+  crypto: CryptoCurrency
+): number {
+  return Number(amount.toFixed(getCryptoAmountDecimals(crypto)));
+}
+
 export function validateAmount(fiatAmount: number): void {
   if (fiatAmount < AMOUNT_LIMITS.MIN) {
     throw new InvalidInputError(
@@ -90,7 +107,7 @@ export function fiatChargeToCrypto(
   crypto: CryptoCurrency,
   rateLock: RateLock
 ): number {
-  if (crypto === 'USDT') {
+  if (isStablecoin(crypto)) {
     return fiatCharge / rateLock.rate;
   }
   return fiatCharge / rateLock.rate / rateLock.assetPrice;
@@ -109,7 +126,7 @@ export function calculateCharges(
   const chargeUsd = fiatCharge / rateLock.rate;
 
   let netCrypto: number;
-  if (crypto === 'USDT') {
+  if (isStablecoin(crypto)) {
     netCrypto = fiatAmount / rateLock.rate;
   } else {
     netCrypto = fiatAmount / rateLock.rate / rateLock.assetPrice;
@@ -124,7 +141,7 @@ export function calculateCharges(
       chargeUsd,
       tierName: tier.name,
       netFiatAmount: fiatAmount - fiatCharge,
-      totalCryptoAmount: netCrypto,
+      totalCryptoAmount: roundCryptoAmount(netCrypto, crypto),
       chargeFrom: 'fiat',
     };
   }
@@ -137,7 +154,7 @@ export function calculateCharges(
     chargeUsd,
     tierName: tier.name,
     netFiatAmount: fiatAmount,
-    totalCryptoAmount: netCrypto + cryptoCharge,
+    totalCryptoAmount: roundCryptoAmount(netCrypto + cryptoCharge, crypto),
     chargeFrom: 'crypto',
   };
 }
@@ -164,7 +181,7 @@ export function calculateChargesFromCrypto(
   tiers: FeeTier[] = DEFAULT_FEE_TIERS
 ): ChargeResult & { derivedFiatAmount: number } {
   // Step 1: gross fiat equivalent of the full crypto amount
-  const grossFiat = crypto === 'USDT'
+  const grossFiat = isStablecoin(crypto)
     ? cryptoAmount * rateLock.rate
     : cryptoAmount * rateLock.assetPrice * rateLock.rate;
 
@@ -189,8 +206,7 @@ export function formatCryptoAmount(
   amount: number,
   crypto: CryptoCurrency
 ): string {
-  const decimals = crypto === 'USDT' ? 4 : 8;
-  return amount.toFixed(decimals);
+  return amount.toFixed(getCryptoAmountDecimals(crypto));
 }
 
 export function formatFiatAmount(

@@ -76,8 +76,6 @@ class RateCache {
 
 const cache = new RateCache();
 
-let adjustedRate: number;
-
 async function fetchExchangeRateFromDb(
   fiatCurrency: FiatCurrency,
 ): Promise<RateData> {
@@ -109,7 +107,7 @@ async function fetchExchangeRateFromDb(
     // Apply 0.8% adjustment
     const percentage = 0.8;
     const adjustment = (percentage / 100) * currentRate;
-    adjustedRate = currentRate - adjustment;
+    const adjustedRate = currentRate - adjustment;
 
     return {
       exchangeRate: adjustedRate,
@@ -134,7 +132,7 @@ async function fetchAssetPriceFromApi(
     if (crypto === "USDT") {
       return {
         symbol: "USDT",
-        priceUsd: adjustedRate,
+        priceUsd: 1,
         fetchedAt: new Date(),
       };
     }

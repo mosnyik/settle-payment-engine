@@ -96,9 +96,9 @@ describe('Charge Calculator', () => {
     });
 
     it('should handle very small amounts', () => {
-      expect(getFeeTier(0).name).toBe('basic');
+      expect(() => getFeeTier(0)).toThrow(InvalidInputError);
       expect(getFeeTier(1).name).toBe('basic');
-      expect(getFeeTier(0.01).name).toBe('basic');
+      expect(() => getFeeTier(0.01)).toThrow(InvalidInputError);
     });
 
     it('should throw error for negative amounts', () => {
@@ -123,7 +123,7 @@ describe('Charge Calculator', () => {
 
   describe('validateAmount', () => {
     it('should accept amounts within limits', () => {
-      expect(() => validateAmount(0)).not.toThrow();
+      expect(() => validateAmount(0)).toThrow();
       expect(() => validateAmount(1)).not.toThrow();
       expect(() => validateAmount(100000)).not.toThrow();
       expect(() => validateAmount(1000000)).not.toThrow();
@@ -402,8 +402,8 @@ describe('Charge Calculator', () => {
   // ===========================================================================
 
   describe('AMOUNT_LIMITS', () => {
-    it('should have MIN of 0', () => {
-      expect(AMOUNT_LIMITS.MIN).toBe(0);
+    it('should have MIN of 1', () => {
+      expect(AMOUNT_LIMITS.MIN).toBe(1);
     });
 
     it('should have MAX of 2,000,000', () => {

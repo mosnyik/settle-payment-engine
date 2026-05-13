@@ -2,11 +2,12 @@
  * Sync Paystack Bank Codes
  *
  * Fetches the full bank list from Paystack and populates the `paystack_code`
- * column in the `banks` table by fuzzy-matching on bank name.
+ * column in the `banks` table by matching Paystack/NIP codes first, then
+ * known aliases and fuzzy bank names.
  *
  * Usage:
- *   npx ts-node scripts/sync-paystack-banks.ts
- *   npx ts-node scripts/sync-paystack-banks.ts --dry-run
+ *   npx tsx scripts/sync-paystack-banks.ts
+ *   npx tsx scripts/sync-paystack-banks.ts --dry-run
  *
  * Prerequisites:
  *   ALTER TABLE banks ADD COLUMN IF NOT EXISTS paystack_code VARCHAR(20) NULL;
@@ -17,6 +18,7 @@ import axios from 'axios';
 import * as dotenv from 'dotenv';
 import { resolve } from 'path';
 import { RowDataPacket, Pool } from 'mysql2/promise';
+import { PaystackBankLike, findPaystackBankMatch } from '../src/services/payment-engine/settlement/paystack-bank-matcher';
 
 // dotenv MUST load before the mysql pool is created — use require() to prevent import hoisting
 dotenv.config({ path: resolve(__dirname, '../.env') });
@@ -25,7 +27,7 @@ const pool: Pool = require('../src/lib/mysql').pool;
 
 const DRY_RUN = process.argv.includes('--dry-run');
 
-interface PaystackBank {
+interface PaystackBank extends PaystackBankLike {
   id: number;
   name: string;
   slug: string;
@@ -43,28 +45,6 @@ interface BankRow extends RowDataPacket {
   paystack_code: string | null;
 }
 
-/** Normalize a bank name for comparison: lowercase, strip punctuation/common words */
-function normalize(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\b(bank|microfinance|mfb|mfbank|finance|limited|ltd|plc|ng|nigeria|nigerian)\b/g, '')
-    .replace(/[^a-z0-9 ]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** Simple similarity: count matching words / max word count */
-function similarity(a: string, b: string): number {
-  const wa = new Set(normalize(a).split(' ').filter(Boolean));
-  const wb = new Set(normalize(b).split(' ').filter(Boolean));
-  if (wa.size === 0 || wb.size === 0) return 0;
-  let matches = 0;
-  for (const w of wa) {
-    if (wb.has(w)) matches++;
-  }
-  return matches / Math.max(wa.size, wb.size);
-}
-
 async function fetchPaystackBanks(): Promise<PaystackBank[]> {
   const key = process.env.PAYSTACK_SECRET_KEY;
   if (!key) throw new Error('PAYSTACK_SECRET_KEY not set in .env');
@@ -75,7 +55,7 @@ async function fetchPaystackBanks(): Promise<PaystackBank[]> {
 
   while (true) {
     const res = await axios.get<{ status: boolean; data: PaystackBank[] }>(
-      `https://api.paystack.co/bank?country=nigeria&perPage=${perPage}&page=${page}`,
+      `https://api.paystack.co/bank?country=nigeria&perPage=${perPage}&page=${page}&include_nip_sort_code=true`,
       { headers: { Authorization: `Bearer ${key}` }, timeout: 15000 }
     );
     const chunk = res.data.data;
@@ -110,43 +90,21 @@ async function main() {
 
   const THRESHOLD = 0.5; // minimum similarity to accept a match
 
-  const updates: { id: number; ourName: string; ourCode: string; paystackName: string; paystackCode: string; score: number }[] = [];
+  const updates: { id: number; ourName: string; ourCode: string; paystackName: string; paystackCode: string; score: number; reason: string }[] = [];
   const unmatched: { name: string; code: string }[] = [];
 
   for (const bank of rows) {
-    // Try exact code match first (CBN code === Paystack code for some banks)
-    const exactCode = paystackBanks.find(p => p.code === bank.code);
-    if (exactCode) {
+    const match = findPaystackBankMatch(bank.code, bank.name, paystackBanks, THRESHOLD);
+
+    if (match) {
       updates.push({
         id: bank.id,
         ourName: bank.name,
         ourCode: bank.code,
-        paystackName: exactCode.name,
-        paystackCode: exactCode.code,
-        score: 1.0,
-      });
-      continue;
-    }
-
-    // Fuzzy name match
-    let best: PaystackBank | null = null;
-    let bestScore = 0;
-    for (const p of paystackBanks) {
-      const score = similarity(bank.name, p.name);
-      if (score > bestScore) {
-        bestScore = score;
-        best = p;
-      }
-    }
-
-    if (best && bestScore >= THRESHOLD) {
-      updates.push({
-        id: bank.id,
-        ourName: bank.name,
-        ourCode: bank.code,
-        paystackName: best.name,
-        paystackCode: best.code,
-        score: bestScore,
+        paystackName: match.bank.name,
+        paystackCode: match.bank.code,
+        score: match.score,
+        reason: match.reason,
       });
     } else {
       unmatched.push({ name: bank.name, code: bank.code });

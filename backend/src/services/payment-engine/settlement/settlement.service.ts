@@ -20,6 +20,7 @@ import {
   MongoroWebhookPayload,
   PaystackWebhookPayload,
 } from './types';
+import { PaystackBankLike, findPaystackBankMatch } from './paystack-bank-matcher';
 import { getApiKeyById } from '../../../security/services/apiKey.service';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 
@@ -683,11 +684,18 @@ export class SettlementService {
     }
 
     try {
-      const res = await axios.get<{ status: boolean; data: Array<{ name: string; code: string }> }>(
-        'https://api.paystack.co/bank?country=nigeria&perPage=100',
+      const res = await axios.get<{ status: boolean; data: PaystackBankLike[] }>(
+        'https://api.paystack.co/bank?country=nigeria&perPage=100&include_nip_sort_code=true',
         { headers: { Authorization: `Bearer ${secretKey}` }, timeout: 10000 }
       );
       const banks = res.data?.data ?? [];
+
+      const paystackMatch = findPaystackBankMatch(cbnCode, bankName, banks);
+      if (paystackMatch) {
+        console.log(`[Settlement] Resolved ${cbnCode} "${bankName}" to Paystack code ${paystackMatch.bank.code} "${paystackMatch.bank.name}" via ${paystackMatch.reason}`);
+        await this.cachePaystackBankCode(cbnCode, paystackMatch.bank.code);
+        return paystackMatch.bank.code;
+      }
 
       // Try exact code match first (some banks share CBN and Paystack codes)
       const exact = banks.find(b => b.code === cbnCode);

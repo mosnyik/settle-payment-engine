@@ -12,7 +12,11 @@ let TronWeb: any = null;
 
 async function getTronWeb(): Promise<any> {
   if (!TronWeb) {
-    TronWeb = (await import('tronweb')).default;
+    const tronWebModule = await import('tronweb');
+    TronWeb =
+      (tronWebModule as any).TronWeb ??
+      (tronWebModule as any).default?.TronWeb ??
+      (tronWebModule as any).default;
   }
   return TronWeb;
 }

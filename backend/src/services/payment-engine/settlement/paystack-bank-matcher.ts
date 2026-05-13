@@ -36,6 +36,12 @@ export function normalizeBankCode(code: string | number | null | undefined): str
   return String(code ?? '').trim();
 }
 
+function bankCodeCandidates(code: string): string[] {
+  const normalized = normalizeBankCode(code);
+  const withoutLeadingZeroes = normalized.replace(/^0+/, '');
+  return [...new Set([normalized, withoutLeadingZeroes].filter(Boolean))];
+}
+
 export function normalizeBankName(name: string): string {
   return name
     .toLowerCase()
@@ -100,13 +106,18 @@ export function findPaystackBankMatch(
   minimumNameScore = 0.5
 ): PaystackBankMatch | null {
   const code = normalizeBankCode(localCode);
+  const codeCandidates = bankCodeCandidates(code);
 
-  const exactPaystackCode = paystackBanks.find(bank => normalizeBankCode(bank.code) === code);
+  const exactPaystackCode = paystackBanks.find(bank => codeCandidates.includes(normalizeBankCode(bank.code)));
   if (exactPaystackCode) {
     return { bank: exactPaystackCode, score: 1, reason: 'paystack-code' };
   }
 
-  const exactNipCode = paystackBanks.find(bank => getPaystackNipCodes(bank).includes(code));
+  const exactNipCode = paystackBanks.find(bank =>
+    getPaystackNipCodes(bank).some(nipCode =>
+      bankCodeCandidates(nipCode).some(candidate => codeCandidates.includes(candidate))
+    )
+  );
   if (exactNipCode) {
     return { bank: exactNipCode, score: 1, reason: 'nip-code' };
   }

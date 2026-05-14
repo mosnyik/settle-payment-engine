@@ -16,6 +16,7 @@ type RecoveryTarget = {
 const USDT_TRC20 = SWEEP_TOKEN_CONTRACTS.trc20.USDT;
 const USDT_DECIMALS = TOKEN_DECIMALS[USDT_TRC20];
 const SUN_PER_TRX = 1_000_000n;
+type RecoverAsset = 'usdt' | 'trx';
 
 let config: any;
 let pool: any;
@@ -40,15 +41,17 @@ function hasFlag(flag: string): boolean {
 
 function usage(): void {
   console.log(`
-Recover stuck HD-wallet USDT TRC20 by transferring it from the derived deposit wallet.
+Recover stuck HD-wallet TRC20 USDT or native TRX from a derived deposit wallet.
 
 Dry run:
   pnpm recover:hd-sweep -- --reference PAY_xxx --to T_DESTINATION
   pnpm recover:hd-sweep -- --session-id SESSION_ID --to T_DESTINATION
   pnpm recover:hd-sweep -- --address T_DEPOSIT --index 12 --to T_DESTINATION
+  pnpm recover:hd-sweep -- --reference PAY_xxx --asset trx --to T_DESTINATION
 
 Broadcast:
   pnpm recover:hd-sweep -- --reference PAY_xxx --to T_DESTINATION --execute
+  pnpm recover:hd-sweep -- --reference PAY_xxx --asset trx --to T_DESTINATION --execute
 
 Options:
   --reference <ref>             Payment session reference.
@@ -56,7 +59,9 @@ Options:
   --address <tron-address>      HD deposit address, used with --index.
   --index <n>                   HD derivation index, used with --address.
   --to <tron-address>           Recovery destination. Defaults to session parent wallet, then HOT_WALLET_TRON.
+  --asset <usdt|trx>            Asset to recover. Default: usdt.
   --amount <usdt>               Amount to send. Defaults to full USDT balance.
+  --reserve-trx <trx>           Native TRX to leave behind when --asset trx. Default: 1.
   --min-trx <trx>               TRX balance required before token transfer. Default: 7.
   --no-prefund                  Do not pre-fund TRX from merchant funding wallet.
   --funding-index <n>           Merchant funding wallet index if not present on the session.
@@ -139,6 +144,14 @@ function trxToSun(value: string): bigint {
 
 function formatTrx(sun: bigint): string {
   return formatUnits(sun, 6);
+}
+
+function getRecoverAsset(): RecoverAsset {
+  const asset = (getArg('--asset', 'usdt') || 'usdt').toLowerCase();
+  if (asset !== 'usdt' && asset !== 'trx') {
+    throw new Error('--asset must be either "usdt" or "trx".');
+  }
+  return asset;
 }
 
 function requireTronAddress(tronWeb: any, address: string, label: string): void {
@@ -316,10 +329,12 @@ async function main(): Promise<void> {
   await loadRuntime();
 
   const execute = hasFlag('--execute');
+  const asset = getRecoverAsset();
   const shouldPrefund = !hasFlag('--no-prefund');
   const mark = hasFlag('--mark-swept');
   const amountArg = getArg('--amount');
   const minTrx = getArg('--min-trx', '7') || '7';
+  const reserveTrx = getArg('--reserve-trx', '1') || '1';
   const fundingPrivateKey = getArg('--funding-private-key');
 
   const target = await resolveTarget();
@@ -352,21 +367,65 @@ async function main(): Promise<void> {
   const contract = await tronWeb.contract().at(USDT_TRC20);
   const tokenBalance = BigInt((await contract.balanceOf(target.fromAddress).call()).toString());
   const trxBalance = BigInt(await tronWeb.trx.getBalance(target.fromAddress));
-  const transferAmount = amountArg ? parseUnits(amountArg, USDT_DECIMALS) : tokenBalance;
+  const tokenTransferAmount = amountArg ? parseUnits(amountArg, USDT_DECIMALS) : tokenBalance;
+  const reserveSun = trxToSun(reserveTrx);
+  const trxTransferAmount = amountArg ? trxToSun(amountArg) : trxBalance - reserveSun;
   const minSun = trxToSun(minTrx);
 
   console.log(`Mode: ${execute ? 'EXECUTE' : 'DRY RUN'}`);
+  console.log(`Asset: ${asset.toUpperCase()}`);
   console.log(`Session: ${target.reference || target.sessionId || '(manual address)'}`);
   console.log(`From: ${target.fromAddress} (index ${target.derivationIndex})`);
   console.log(`To: ${target.toAddress}`);
   console.log(`USDT balance: ${formatUnits(tokenBalance, USDT_DECIMALS)} USDT`);
-  console.log(`Transfer amount: ${formatUnits(transferAmount, USDT_DECIMALS)} USDT`);
   console.log(`TRX balance: ${formatTrx(trxBalance)} TRX`);
+  console.log(
+    asset === 'usdt'
+      ? `Transfer amount: ${formatUnits(tokenTransferAmount, USDT_DECIMALS)} USDT`
+      : `Transfer amount: ${formatTrx(trxTransferAmount)} TRX`
+  );
 
-  if (transferAmount <= 0n) {
+  if (asset === 'trx') {
+    if (trxTransferAmount <= 0n) {
+      throw new Error(
+        `No TRX amount to transfer after reserving ${formatTrx(reserveSun)} TRX. ` +
+        'Use --amount to send an explicit amount or lower --reserve-trx.'
+      );
+    }
+    if (trxTransferAmount >= trxBalance) {
+      throw new Error('TRX transfer amount must be less than wallet balance to leave room for fees.');
+    }
+
+    if (!execute) {
+      console.log('Dry run only. Re-run with --execute to broadcast.');
+      return;
+    }
+
+    const tx = await tronWeb.transactionBuilder.sendTrx(
+      target.toAddress,
+      Number(trxTransferAmount),
+      target.fromAddress
+    );
+    const signedTx = await tronWeb.trx.sign(tx);
+    const result = await tronWeb.trx.sendRawTransaction(signedTx);
+
+    if (!result.result) {
+      throw new Error(`TRX transfer failed: ${result.message || JSON.stringify(result)}`);
+    }
+
+    console.log(`TRX transfer broadcast: ${result.txid}`);
+
+    if (mark) {
+      await markSwept(target, result.txid);
+      console.log('Marked derived address sweep metadata.');
+    }
+    return;
+  }
+
+  if (tokenTransferAmount <= 0n) {
     throw new Error('No USDT amount to transfer.');
   }
-  if (transferAmount > tokenBalance) {
+  if (tokenTransferAmount > tokenBalance) {
     throw new Error('Requested --amount is greater than the wallet USDT balance.');
   }
 
@@ -393,7 +452,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const txHash = await contract.transfer(target.toAddress, transferAmount.toString()).send({
+  const txHash = await contract.transfer(target.toAddress, tokenTransferAmount.toString()).send({
     feeLimit: 100_000_000,
     callValue: 0,
     shouldPollResponse: false,

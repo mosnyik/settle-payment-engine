@@ -39,6 +39,16 @@ vi.mock('@/services/payment-engine/charges', () => ({
     netFiatAmount: 50000,
     totalCryptoAmount: 31.5625,
   }),
+  calculateChargesFromCrypto: vi.fn().mockImplementation((cryptoAmount: number) => ({
+    fiatCharge: 500,
+    cryptoCharge: 0.3125,
+    chargeUsd: 0.3125,
+    tierName: 'basic',
+    netFiatAmount: cryptoAmount * 1600 - 500,
+    totalCryptoAmount: cryptoAmount,
+    chargeFrom: 'crypto',
+    derivedFiatAmount: cryptoAmount * 1600 - 500,
+  })),
 }));
 
 // Mock wallet pool
@@ -314,6 +324,18 @@ describe('SessionManager', () => {
         expect(updated.status).toBe('confirming');
         expect(updated.txHash).toBe('0xabc...');
         expect(updated.receivedAmount).toBe(31.5);
+      });
+
+      it('should update payout from actual received amount', async () => {
+        const mockSession = createMockSession({ status: 'pending', fiatAmount: 50000 });
+        mockRepo._addSession(mockSession);
+
+        const updated = await manager.markDeposit(mockSession.id, '0xabc...', 28);
+
+        expect(updated.fiatAmount).toBe(50000);
+        expect(updated.settledFiatAmount).toBe(44300);
+        expect(updated.chargeAmount).toBe(500);
+        expect(updated.transactionUsd).toBeCloseTo(27.6875);
       });
 
       it('should throw for non-pending session', async () => {

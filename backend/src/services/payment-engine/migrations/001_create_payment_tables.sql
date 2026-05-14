@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS payment_sessions (
   tx_hash           VARCHAR(100) NULL,
   confirmations     INT DEFAULT 0,
   received_amount   DECIMAL(18, 8) NULL,
+  settled_fiat_amount DECIMAL(15, 2) NULL,
 
   -- Settlement
   settlement_reference VARCHAR(100) NULL,

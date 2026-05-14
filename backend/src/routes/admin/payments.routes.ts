@@ -67,7 +67,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
          ps.crypto, ps.crypto_amount, ps.network,
          ps.rate, ps.charge_amount,
          ps.deposit_address, ps.tx_hash, ps.confirmations,
-         ps.received_amount,
+         ps.received_amount, ps.settled_fiat_amount,
          ps.settlement_reference, ps.settlement_provider,
          ps.merchant_id, ps.merchant_reference,
          ps.api_key_id,

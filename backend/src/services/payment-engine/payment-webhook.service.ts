@@ -34,6 +34,7 @@ interface SessionWebhookRow extends RowDataPacket {
   network: string | null;
   tx_hash: string | null;
   received_amount: number | null;
+  settled_fiat_amount: number | null;
   metadata: string | Record<string, unknown> | null;
   webhook_url: string | null;
   webhook_secret: string | null;
@@ -57,7 +58,7 @@ export async function sendPaymentWebhook(
     const [rows] = await pool.query<SessionWebhookRow[]>(
       `SELECT ps.id, ps.reference, ps.type, ps.status,
               ps.fiat_amount, ps.fiat_currency, ps.crypto_amount, ps.crypto,
-              ps.network, ps.tx_hash, ps.received_amount, ps.metadata,
+              ps.network, ps.tx_hash, ps.received_amount, ps.settled_fiat_amount, ps.metadata,
               ak.webhook_url, ak.webhook_secret
        FROM payment_sessions ps
        LEFT JOIN api_keys ak ON ak.id = ps.api_key_id
@@ -87,6 +88,7 @@ export async function sendPaymentWebhook(
         network: row.network,
         txHash: row.tx_hash,
         receivedAmount: row.received_amount != null ? Number(row.received_amount) : null,
+        settledFiatAmount: row.settled_fiat_amount != null ? Number(row.settled_fiat_amount) : null,
         metadata,
       },
       ...(extraData ?? {}),

@@ -46,6 +46,7 @@ interface SessionRow extends RowDataPacket {
   reference: string;
   status: string;
   fiat_amount: number;
+  settled_fiat_amount: number | null;
   fiat_currency: string;
   receiver_id: number | null;
   api_key_id: number | null;
@@ -125,6 +126,7 @@ export class SettlementService {
 
     // 3. Determine settlement mode from the API key that created this session
     const settlementMode = await this.getSettlementMode(session.api_key_id);
+    const payoutFiatAmount = this.getPayoutFiatAmount(session);
 
     // 4. Update status to settling
     await this.updateSessionStatus(sessionId, 'settling');
@@ -146,7 +148,7 @@ export class SettlementService {
         sessionId,
         provider: 'self',
         status: 'pending',
-        amount: session.fiat_amount,
+        amount: payoutFiatAmount,
         accountNumber: receiver.accountNumber,
         bankCode: receiver.bankCode,
         accountName: receiver.accountName,
@@ -166,12 +168,12 @@ export class SettlementService {
       // 5a. Pre-flight balance check — don't attempt a transfer we know will fail
       const balanceResult = await this.paystack.getBalance();
       if (balanceResult.success && balanceResult.balance !== undefined) {
-        if (balanceResult.balance < session.fiat_amount) {
+        if (balanceResult.balance < payoutFiatAmount) {
           await this.createSettlementAttempt({
             sessionId,
             provider: 'paystack',
             status: 'failed',
-            amount: session.fiat_amount,
+            amount: payoutFiatAmount,
             accountNumber: receiver.accountNumber,
             bankCode: receiver.bankCode,
             accountName: receiver.accountName,
@@ -180,11 +182,11 @@ export class SettlementService {
 
           // Balance won't cover this payment — alert and leave in settling for manual resolution
           await this.telegram.sendPaystackInsufficientBalanceAlert(
-            { reference: session.reference, fiatAmount: session.fiat_amount, fiatCurrency: session.fiat_currency },
+            { reference: session.reference, fiatAmount: payoutFiatAmount, fiatCurrency: session.fiat_currency },
             receiver,
             'pre-transfer-check'
           );
-          console.error(`[Settlement][Paystack] Insufficient balance (${balanceResult.balance}) for ${session.reference} (${session.fiat_amount}) — skipping transfer`);
+          console.error(`[Settlement][Paystack] Insufficient balance (${balanceResult.balance}) for ${session.reference} (${payoutFiatAmount}) — skipping transfer`);
           return;
         }
       }
@@ -196,7 +198,7 @@ export class SettlementService {
         sessionId,
         provider: 'paystack',
         status: 'pending',
-        amount: session.fiat_amount,
+        amount: payoutFiatAmount,
         accountNumber: receiver.accountNumber,
         bankCode: paystackBankCode,
         accountName: receiver.accountName,
@@ -206,7 +208,7 @@ export class SettlementService {
         receiver.accountNumber,
         paystackBankCode,
         receiver.accountName,
-        session.fiat_amount,
+        payoutFiatAmount,
         narration,
         session.fiat_currency,
         receiver.paystackRecipientCode
@@ -244,7 +246,7 @@ export class SettlementService {
       sessionId,
       provider: 'mongoro',
       status: 'pending',
-      amount: session.fiat_amount,
+      amount: payoutFiatAmount,
       accountNumber: receiver.accountNumber,
       bankCode: receiver.bankCode,
       accountName: receiver.accountName,
@@ -258,7 +260,7 @@ export class SettlementService {
       receiver.bankCode,
       receiver.bankName || receiver.bankCode,
       receiver.accountName,
-      session.fiat_amount,
+      payoutFiatAmount,
       narration,
       session.fiat_currency
     );
@@ -370,7 +372,7 @@ export class SettlementService {
     // Convert SessionRow to SessionAlertData
     const sessionData: SessionAlertData = {
       reference: session.reference,
-      fiatAmount: session.fiat_amount,
+      fiatAmount: this.getPayoutFiatAmount(session),
       fiatCurrency: session.fiat_currency,
     };
 
@@ -457,7 +459,7 @@ export class SettlementService {
           await this.telegram.sendPaystackInsufficientBalanceAlert(
             {
               reference: sessionData.reference,
-              fiatAmount: sessionData.fiat_amount,
+              fiatAmount: this.getPayoutFiatAmount(sessionData),
               fiatCurrency: sessionData.fiat_currency,
             },
             receiver,
@@ -478,7 +480,7 @@ export class SettlementService {
         await this.telegram.sendSettlementReversalAlert(
           {
             reference: sessionData.reference,
-            fiatAmount: sessionData.fiat_amount,
+            fiatAmount: this.getPayoutFiatAmount(sessionData),
             fiatCurrency: sessionData.fiat_currency,
           },
           reference,
@@ -555,7 +557,7 @@ export class SettlementService {
         await this.telegram.sendSettlementReversalAlert(
           {
             reference: sessionData.reference,
-            fiatAmount: sessionData.fiat_amount,
+            fiatAmount: this.getPayoutFiatAmount(sessionData),
             fiatCurrency: sessionData.fiat_currency,
           },
           reference,
@@ -588,7 +590,7 @@ export class SettlementService {
       sessionId: session.id,
       provider: 'manual',
       status: 'success',
-      amount: session.fiat_amount,
+      amount: this.getPayoutFiatAmount(session),
       accountNumber: 'manual',
       bankCode: 'manual',
       accountName: 'Manual settlement by admin',
@@ -612,9 +614,13 @@ export class SettlementService {
     }
   }
 
+  private getPayoutFiatAmount(session: SessionRow): number {
+    return Number(session.settled_fiat_amount ?? session.fiat_amount);
+  }
+
   private async getSession(sessionId: string): Promise<SessionRow | null> {
     const [rows] = await pool.execute<SessionRow[]>(
-      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id, api_key_id, is_sandbox
+      `SELECT id, reference, status, fiat_amount, settled_fiat_amount, fiat_currency, receiver_id, api_key_id, is_sandbox
        FROM payment_sessions WHERE id = ?`,
       [sessionId]
     );
@@ -623,7 +629,7 @@ export class SettlementService {
 
   private async getSessionByReference(reference: string): Promise<SessionRow | null> {
     const [rows] = await pool.execute<SessionRow[]>(
-      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id, api_key_id,
+      `SELECT id, reference, status, fiat_amount, settled_fiat_amount, fiat_currency, receiver_id, api_key_id,
               settlement_token, settlement_token_expires_at
        FROM payment_sessions WHERE reference = ?`,
       [reference]
@@ -633,7 +639,7 @@ export class SettlementService {
 
   private async getSessionBySettlementReference(settlementRef: string): Promise<SessionRow | null> {
     const [rows] = await pool.execute<SessionRow[]>(
-      `SELECT id, reference, status, fiat_amount, fiat_currency, receiver_id, api_key_id
+      `SELECT id, reference, status, fiat_amount, settled_fiat_amount, fiat_currency, receiver_id, api_key_id
        FROM payment_sessions WHERE settlement_reference = ?`,
       [settlementRef]
     );

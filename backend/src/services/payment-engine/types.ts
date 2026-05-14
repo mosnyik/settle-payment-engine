@@ -140,6 +140,8 @@ export interface PaymentSession {
   txHash?: string;
   confirmations?: number;
   receivedAmount?: number;
+  /** Fiat amount paid or payable during settlement, derived from the actual received crypto. */
+  settledFiatAmount?: number;
   createdAt: Date;
   expiresAt: Date;
   confirmedAt?: Date;

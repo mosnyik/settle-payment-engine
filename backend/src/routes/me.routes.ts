@@ -52,7 +52,7 @@ router.get('/payments', async (req: Request, res: Response, next: NextFunction) 
              ps.crypto, ps.crypto_amount, ps.network,
              ps.rate, ps.charge_amount,
              ps.deposit_address, ps.tx_hash, ps.confirmations,
-             ps.received_amount,
+             ps.received_amount, ps.settled_fiat_amount,
              ps.settlement_reference, ps.settlement_provider,
              ps.merchant_id, ps.merchant_reference, ps.api_key_id,
              ps.expires_at, ps.confirmed_at, ps.settled_at,
@@ -181,7 +181,7 @@ function escapeCell(value: unknown): string {
 
 const REPORT_HEADERS = [
   'reference', 'type', 'status',
-  'fiat_amount', 'fiat_currency', 'charge_amount', 'net_fiat_amount', 'transaction_usd',
+  'fiat_amount', 'fiat_currency', 'charge_amount', 'net_fiat_amount', 'settled_fiat_amount', 'transaction_usd',
   'crypto', 'network', 'crypto_amount', 'received_amount', 'rate',
   'tx_hash', 'settlement_reference', 'settlement_provider',
   'receiver_account_number', 'receiver_account_name', 'receiver_bank_name', 'receiver_bank_code',
@@ -234,7 +234,8 @@ router.get('/reports/reconciliation', async (req: Request, res: Response, next: 
       SELECT
         ps.reference, ps.type, ps.status,
         ps.fiat_amount, ps.fiat_currency, ps.charge_amount,
-        (ps.fiat_amount - COALESCE(ps.charge_amount, 0)) AS net_fiat_amount,
+        COALESCE(ps.settled_fiat_amount, ps.fiat_amount - COALESCE(ps.charge_amount, 0)) AS net_fiat_amount,
+        ps.settled_fiat_amount,
         ps.transaction_usd,
         ps.crypto, ps.network, ps.crypto_amount, ps.received_amount, ps.rate,
         ps.tx_hash, ps.settlement_reference, ps.settlement_provider,
@@ -268,7 +269,10 @@ router.get('/reports/reconciliation', async (req: Request, res: Response, next: 
             totalFiatAmount: rows.reduce((s, r) => s + (Number(r.fiat_amount) || 0), 0),
             totalCharges: rows.reduce((s, r) => s + (Number(r.charge_amount) || 0), 0),
             totalNetFiat: rows.reduce(
-              (s, r) => s + (Number(r.fiat_amount) || 0) - (Number(r.charge_amount) || 0),
+              (s, r) => s + (
+                Number(r.settled_fiat_amount)
+                || ((Number(r.fiat_amount) || 0) - (Number(r.charge_amount) || 0))
+              ),
               0,
             ),
             totalUsd: rows.reduce((s, r) => s + (Number(r.transaction_usd) || 0), 0),
@@ -291,6 +295,13 @@ router.get('/reports/reconciliation', async (req: Request, res: Response, next: 
     // Summary row
     const totalFiat = rows.reduce((s, r) => s + (Number(r.fiat_amount) || 0), 0);
     const totalCharges = rows.reduce((s, r) => s + (Number(r.charge_amount) || 0), 0);
+    const totalNetFiat = rows.reduce(
+      (s, r) => s + (
+        Number(r.settled_fiat_amount)
+        || ((Number(r.fiat_amount) || 0) - (Number(r.charge_amount) || 0))
+      ),
+      0,
+    );
     lines.push(
       [
         escapeCell(`TOTAL (${rows.length} records)`),
@@ -298,7 +309,8 @@ router.get('/reports/reconciliation', async (req: Request, res: Response, next: 
         escapeCell(totalFiat.toFixed(2)),
         escapeCell(rows[0]?.fiat_currency ?? 'NGN'),
         escapeCell(totalCharges.toFixed(2)),
-        escapeCell((totalFiat - totalCharges).toFixed(2)),
+        escapeCell(totalNetFiat.toFixed(2)),
+        escapeCell(totalNetFiat.toFixed(2)),
         escapeCell(rows.reduce((s, r) => s + (Number(r.transaction_usd) || 0), 0).toFixed(6)),
         ...Array(19).fill(''),
       ].join(','),

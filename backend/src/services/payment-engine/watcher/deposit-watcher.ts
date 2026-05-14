@@ -752,7 +752,6 @@ export class DepositWatcher extends EventEmitter {
         };
         this.emitEvent(event);
         await txStore.logFraudEvent(event);
-        continue;
       }
 
       // Deposit detected!
@@ -891,7 +890,6 @@ export class DepositWatcher extends EventEmitter {
       };
       this.emitEvent(event);
       await txStore.logFraudEvent(event);
-      return;
     }
 
     // Check for RBF replacement (Bitcoin)
@@ -1021,7 +1019,6 @@ export class DepositWatcher extends EventEmitter {
       if (!validation.valid) continue;
 
       const amountMatch = this.checkAmountMatch(candidate.amountDecimal, session.expectedAmount);
-      if (amountMatch === 'underpaid') continue;
 
       this.emitEvent({
         type: session.chain === 'bitcoin' ? 'rbf_replacement' : 'deposit_detected',

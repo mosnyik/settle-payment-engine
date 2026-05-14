@@ -20,7 +20,7 @@ import { lockRate } from '../rate';
 import { calculateCharges, calculateChargesFromCrypto } from '../charges';
 import { assignWallet, releaseWallet } from '../wallet';
 import { getHDWalletService } from '../hd-wallet';
-import { SessionRepository, sessionRepository, CreateSessionData } from './session-repository';
+import { SessionRepository, sessionRepository, UpdateSessionData, CreateSessionData } from './session-repository';
 import { getDepositWatcher } from '../watcher';
 
 const VALID_CRYPTO_NETWORKS: Record<string, string[]> = {
@@ -141,6 +141,36 @@ export class SessionManager {
   ) {
     this.repository = repository;
     this.config = config;
+  }
+
+  private calculateActualReceivedUpdate(
+    session: PaymentSession,
+    receivedAmount: number
+  ): Pick<UpdateSessionData, 'settledFiatAmount' | 'transactionUsd' | 'chargeAmount'> {
+    if (!session.crypto || !session.rate) {
+      throw new InvalidInputError(
+        'Cannot derive payout from received amount without locked crypto and rate',
+        'receivedAmount',
+        receivedAmount
+      );
+    }
+
+    const actualCharges = calculateChargesFromCrypto(
+      receivedAmount,
+      session.crypto,
+      {
+        rate: session.rate,
+        assetPrice: session.assetPrice ?? 1,
+        lockedAt: session.createdAt,
+        expiresAt: session.expiresAt,
+      }
+    );
+
+    return {
+      settledFiatAmount: actualCharges.netFiatAmount,
+      transactionUsd: actualCharges.netFiatAmount / session.rate,
+      chargeAmount: actualCharges.fiatCharge,
+    };
   }
 
   async createSession(input: CreatePaymentInput): Promise<PaymentSession> {
@@ -360,10 +390,13 @@ export class SessionManager {
       );
     }
 
+    const actualReceivedUpdate = this.calculateActualReceivedUpdate(session, receivedAmount);
+
     return this.repository.update(id, {
       status: 'confirming',
       txHash,
       receivedAmount,
+      ...actualReceivedUpdate,
     });
   }
 
@@ -420,10 +453,13 @@ export class SessionManager {
       );
     }
 
+    const actualReceivedUpdate = this.calculateActualReceivedUpdate(session, receivedAmount);
+
     return this.repository.update(id, {
       txHash,
       receivedAmount,
       confirmations,
+      ...actualReceivedUpdate,
     });
   }
 

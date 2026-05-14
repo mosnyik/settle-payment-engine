@@ -40,6 +40,7 @@ const CSV_HEADERS = [
   'fiat_currency',
   'charge_amount',
   'net_fiat_amount',
+  'settled_fiat_amount',
   'transaction_usd',
   'crypto',
   'network',
@@ -74,7 +75,8 @@ function buildReportQuery(conditions: string[], values: unknown[], includeApiKey
       ps.fiat_amount,
       ps.fiat_currency,
       ps.charge_amount,
-      (ps.fiat_amount - COALESCE(ps.charge_amount, 0))   AS net_fiat_amount,
+      COALESCE(ps.settled_fiat_amount, ps.fiat_amount - COALESCE(ps.charge_amount, 0)) AS net_fiat_amount,
+      ps.settled_fiat_amount,
       ps.transaction_usd,
       ps.crypto,
       ps.network,
@@ -110,12 +112,15 @@ function buildSummaryRow(rows: RowDataPacket[]): string {
   const count = rows.length;
   let totalFiat = 0;
   let totalCharges = 0;
+  let totalNetFiat = 0;
   let totalUsd = 0;
   let totalCrypto = 0;
 
   for (const r of rows) {
     totalFiat += Number(r.fiat_amount) || 0;
     totalCharges += Number(r.charge_amount) || 0;
+    totalNetFiat += Number(r.settled_fiat_amount)
+      || ((Number(r.fiat_amount) || 0) - (Number(r.charge_amount) || 0));
     totalUsd += Number(r.transaction_usd) || 0;
     totalCrypto += Number(r.received_amount || r.crypto_amount) || 0;
   }
@@ -126,7 +131,8 @@ function buildSummaryRow(rows: RowDataPacket[]): string {
     totalFiat.toFixed(2),
     rows[0]?.fiat_currency ?? 'NGN',
     totalCharges.toFixed(2),
-    (totalFiat - totalCharges).toFixed(2),
+    totalNetFiat.toFixed(2),
+    totalNetFiat.toFixed(2),
     totalUsd.toFixed(6),
     '', '', // crypto, network
     totalCrypto.toFixed(8),
@@ -224,7 +230,10 @@ router.get('/reconciliation', async (req: Request, res: Response, next: NextFunc
             totalCharges: rows.reduce((s, r) => s + (Number(r.charge_amount) || 0), 0),
             totalNetFiat: rows.reduce(
               (s, r) =>
-                s + (Number(r.fiat_amount) || 0) - (Number(r.charge_amount) || 0),
+                s + (
+                  Number(r.settled_fiat_amount)
+                  || ((Number(r.fiat_amount) || 0) - (Number(r.charge_amount) || 0))
+                ),
               0,
             ),
             totalUsd: rows.reduce((s, r) => s + (Number(r.transaction_usd) || 0), 0),

@@ -47,6 +47,7 @@ export interface UpdateSessionData {
   txHash?: string;
   confirmations?: number;
   receivedAmount?: number;
+  settledFiatAmount?: number;
   confirmedAt?: Date;
   settledAt?: Date;
   payerId?: number;
@@ -96,6 +97,7 @@ function rowToSession(row: any): PaymentSession {
     txHash: row.tx_hash || undefined,
     confirmations: row.confirmations ? Number(row.confirmations) : undefined,
     receivedAmount: row.received_amount ? Number(row.received_amount) : undefined,
+    settledFiatAmount: row.settled_fiat_amount != null ? Number(row.settled_fiat_amount) : undefined,
     createdAt: new Date(row.created_at),
     expiresAt: new Date(row.expires_at),
     confirmedAt: row.confirmed_at ? new Date(row.confirmed_at) : undefined,
@@ -306,6 +308,10 @@ export class SessionRepository {
     if (data.receivedAmount !== undefined) {
       updates.push('received_amount = ?');
       values.push(data.receivedAmount);
+    }
+    if (data.settledFiatAmount !== undefined) {
+      updates.push('settled_fiat_amount = ?');
+      values.push(data.settledFiatAmount);
     }
     if (data.confirmedAt !== undefined) {
       updates.push('confirmed_at = ?');

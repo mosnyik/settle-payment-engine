@@ -333,7 +333,7 @@ async function main(): Promise<void> {
   const shouldPrefund = !hasFlag('--no-prefund');
   const mark = hasFlag('--mark-swept');
   const amountArg = getArg('--amount');
-  const minTrx = getArg('--min-trx', '7') || '7';
+  const minTrx = getArg('--min-trx', '10') || '10';
   const reserveTrx = getArg('--reserve-trx', '1') || '1';
   const fundingPrivateKey = getArg('--funding-private-key');
 
@@ -355,7 +355,7 @@ async function main(): Promise<void> {
   });
 
   requireTronAddress(tronWeb, target.fromAddress, '--address/fromAddress');
-  requireTronAddress(tronWeb, target.toAddress, '--to');
+  requireTronAddress(tronWeb, target.toAddress!, '--to');
 
   if (keyMaterial.address !== target.fromAddress) {
     throw new Error(

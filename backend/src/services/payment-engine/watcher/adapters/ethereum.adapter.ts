@@ -450,9 +450,28 @@ export class EthereumAdapter extends ChainAdapter {
    * Check API response for errors.
    */
   private checkResponse<T>(response: EtherscanResponse<T>): void {
-    if (response.status !== '1' && response.message !== 'No transactions found') {
-      throw new Error(response.message || 'API error');
+    if (response.status === '1' || this.isNoTransactionsResponse(response)) {
+      return;
     }
+
+    const details =
+      typeof response.result === 'string' && response.result
+        ? `: ${response.result}`
+        : '';
+
+    throw new Error(`${response.message || 'API error'}${details}`);
+  }
+
+  /**
+   * Etherscan sometimes reports empty account/token lists as status=0 with
+   * message=NOTOK and the real reason in result.
+   */
+  private isNoTransactionsResponse<T>(response: EtherscanResponse<T>): boolean {
+    const result = typeof response.result === 'string' ? response.result : '';
+    return (
+      response.message === 'No transactions found' ||
+      result.toLowerCase().includes('no transactions found')
+    );
   }
 
   /**

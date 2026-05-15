@@ -19,6 +19,11 @@ export interface PaystackBankMatch {
 }
 
 const BANK_ALIASES: Record<string, string[]> = {
+  gtbank: ['gt bank', 'guaranty trust', 'guaranty trust bank', 'gtco'],
+  'gt bank': ['gtbank', 'guaranty trust', 'guaranty trust bank', 'gtco'],
+  'guaranty trust': ['gtbank', 'gt bank', 'guaranty trust bank', 'gtco'],
+  'guaranty trust bank': ['gtbank', 'gt bank', 'guaranty trust', 'gtco'],
+  gtco: ['gtbank', 'gt bank', 'guaranty trust', 'guaranty trust bank'],
   opay: ['paycom'],
   'o pay': ['paycom'],
   paycom: ['opay', 'o pay'],

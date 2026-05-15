@@ -690,11 +690,7 @@ export class SettlementService {
     }
 
     try {
-      const res = await axios.get<{ status: boolean; data: PaystackBankLike[] }>(
-        'https://api.paystack.co/bank?country=nigeria&perPage=100&include_nip_sort_code=true',
-        { headers: { Authorization: `Bearer ${secretKey}` }, timeout: 10000 }
-      );
-      const banks = res.data?.data ?? [];
+      const banks = await this.fetchPaystackBanks(secretKey);
 
       const paystackMatch = findPaystackBankMatch(cbnCode, bankName, banks);
       if (paystackMatch) {
@@ -731,6 +727,29 @@ export class SettlementService {
   private async cachePaystackBankCode(cbnCode: string, paystackCode: string): Promise<void> {
     await pool.execute('UPDATE banks SET paystack_code = ? WHERE code = ?', [paystackCode, cbnCode]);
     console.log(`[Settlement] Cached Paystack code for CBN ${cbnCode} → ${paystackCode}`);
+  }
+
+  private async fetchPaystackBanks(secretKey: string): Promise<PaystackBankLike[]> {
+    const banks: PaystackBankLike[] = [];
+    const perPage = 100;
+    let page = 1;
+
+    while (true) {
+      const res = await axios.get<{ status: boolean; data: PaystackBankLike[] }>(
+        `https://api.paystack.co/bank?country=nigeria&perPage=${perPage}&page=${page}&include_nip_sort_code=true`,
+        { headers: { Authorization: `Bearer ${secretKey}` }, timeout: 10000 }
+      );
+
+      const chunk = res.data?.data ?? [];
+      if (chunk.length === 0) break;
+
+      banks.push(...chunk);
+      if (chunk.length < perPage) break;
+
+      page++;
+    }
+
+    return banks;
   }
 
   private fuzzyFindBank(

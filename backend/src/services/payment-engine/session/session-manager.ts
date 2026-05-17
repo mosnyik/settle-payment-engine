@@ -163,16 +163,26 @@ export class SessionManager {
       };
     }
 
-    const actualCharges = calculateChargesFromCrypto(
-      receivedAmount,
-      session.crypto,
-      {
-        rate: session.rate,
-        assetPrice: session.assetPrice ?? 1,
-        lockedAt: session.createdAt,
-        expiresAt: session.expiresAt,
-      }
-    );
+    const chargeFrom = session.chargeFrom ?? 'crypto';
+    const rateLock = {
+      rate: session.rate,
+      assetPrice: session.assetPrice ?? 1,
+      lockedAt: session.createdAt,
+      expiresAt: session.expiresAt,
+    };
+    const actualCharges = chargeFrom === 'fiat'
+      ? calculateCharges(
+          receivedAmount * rateLock.assetPrice * rateLock.rate,
+          session.crypto,
+          rateLock,
+          undefined,
+          'fiat'
+        )
+      : calculateChargesFromCrypto(
+          receivedAmount,
+          session.crypto,
+          rateLock
+        );
 
     return {
       settledFiatAmount: actualCharges.netFiatAmount,
@@ -234,6 +244,7 @@ export class SessionManager {
         rate: undefined,
         assetPrice: undefined,
         chargeAmount: undefined,
+        chargeFrom: resolvedInput.chargeFrom ?? 'crypto',
         depositAddress: undefined,
         merchantId: resolvedInput.merchantId,
         apiKeyId: resolvedInput.apiKeyId,
@@ -303,6 +314,7 @@ export class SessionManager {
       rate: rateLock.rate,
       assetPrice: rateLock.assetPrice,
       chargeAmount: charges.fiatCharge,
+      chargeFrom: charges.chargeFrom,
       depositAddress,
       walletId,
       derivationIndex,
@@ -648,6 +660,7 @@ export class SessionManager {
       rate: rateLock.rate,
       assetPrice: rateLock.assetPrice,
       chargeAmount: charges.fiatCharge,
+      chargeFrom: charges.chargeFrom,
       transactionUsd: rateLock.rate ? charges.netFiatAmount / rateLock.rate : undefined,
       depositAddress,
       walletId,

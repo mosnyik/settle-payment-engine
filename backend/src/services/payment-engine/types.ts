@@ -127,6 +127,7 @@ export interface PaymentSession {
   rate?: number; // Optional for request type (set at fulfillment)
   assetPrice?: number; // Optional for request type (set at fulfillment)
   chargeAmount?: number; // Optional for request type (set at fulfillment)
+  chargeFrom?: 'fiat' | 'crypto';
   depositAddress?: string; // Optional for request type (set at fulfillment)
   walletId?: number; // Deprecated: use derivationIndex
   derivationIndex?: number; // HD wallet derivation index

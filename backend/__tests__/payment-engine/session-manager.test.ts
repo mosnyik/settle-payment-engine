@@ -32,13 +32,21 @@ vi.mock('@/services/payment-engine/rate', () => ({
 
 // Mock charge calculator
 vi.mock('@/services/payment-engine/charges', () => ({
-  calculateCharges: vi.fn().mockReturnValue({
+  calculateCharges: vi.fn().mockImplementation((
+    fiatAmount: number,
+    _crypto: string,
+    _rateLock: unknown,
+    _tiers: unknown,
+    chargeFrom: 'fiat' | 'crypto' = 'crypto'
+  ) => ({
     fiatCharge: 500,
     cryptoCharge: 0.3125,
+    chargeUsd: 0.3125,
     tierName: 'basic',
-    netFiatAmount: 50000,
-    totalCryptoAmount: 31.5625,
-  }),
+    netFiatAmount: chargeFrom === 'fiat' ? fiatAmount - 500 : fiatAmount,
+    totalCryptoAmount: chargeFrom === 'fiat' ? fiatAmount / 1600 : fiatAmount / 1600 + 0.3125,
+    chargeFrom,
+  })),
   calculateChargesFromCrypto: vi.fn().mockImplementation((cryptoAmount: number) => ({
     fiatCharge: 500,
     cryptoCharge: 0.3125,
@@ -156,6 +164,7 @@ function createMockSession(overrides: Partial<PaymentSession> = {}): PaymentSess
     assetPrice: 1,
     rateLockedAt: new Date(),
     chargeAmount: 500,
+    chargeFrom: 'crypto',
     chargeCrypto: 0.3125,
     depositAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f3eA42',
     walletId: 1,
@@ -357,6 +366,40 @@ describe('SessionManager', () => {
         const updated = await manager.markDeposit(mockSession.id, '0xabc...', 40);
 
         expect(updated.fiatAmount).toBe(50000);
+        expect(updated.settledFiatAmount).toBe(63500);
+        expect(updated.chargeAmount).toBe(500);
+        expect(updated.transactionUsd).toBeCloseTo(39.6875);
+      });
+
+      it('should deduct the charge from recalculated fiat when chargeFrom is fiat and underpaid', async () => {
+        const mockSession = createMockSession({
+          status: 'pending',
+          fiatAmount: 49500,
+          cryptoAmount: 31.25,
+          chargeFrom: 'fiat',
+        });
+        mockRepo._addSession(mockSession);
+
+        const updated = await manager.markDeposit(mockSession.id, '0xabc...', 28);
+
+        expect(updated.fiatAmount).toBe(49500);
+        expect(updated.settledFiatAmount).toBe(44300);
+        expect(updated.chargeAmount).toBe(500);
+        expect(updated.transactionUsd).toBeCloseTo(27.6875);
+      });
+
+      it('should deduct the charge from recalculated fiat when chargeFrom is fiat and overpaid', async () => {
+        const mockSession = createMockSession({
+          status: 'pending',
+          fiatAmount: 49500,
+          cryptoAmount: 31.25,
+          chargeFrom: 'fiat',
+        });
+        mockRepo._addSession(mockSession);
+
+        const updated = await manager.markDeposit(mockSession.id, '0xabc...', 40);
+
+        expect(updated.fiatAmount).toBe(49500);
         expect(updated.settledFiatAmount).toBe(63500);
         expect(updated.chargeAmount).toBe(500);
         expect(updated.transactionUsd).toBeCloseTo(39.6875);

@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS payment_sessions (
   rate              DECIMAL(15, 4) NULL,
   asset_price       DECIMAL(18, 8) NULL,
   charge_amount     DECIMAL(15, 2) DEFAULT 0,
+  charge_from       ENUM('fiat', 'crypto') NOT NULL DEFAULT 'crypto',
 
   -- Wallet assignment (legacy pool)
   deposit_address   VARCHAR(100) NULL,

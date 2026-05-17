@@ -26,6 +26,7 @@ export interface CreateSessionData {
   rate?: number; // Optional for request type (set at fulfillment)
   assetPrice?: number; // Optional for request type (set at fulfillment)
   chargeAmount?: number; // Optional for request type (set at fulfillment)
+  chargeFrom?: 'fiat' | 'crypto';
   depositAddress?: string; // Optional for request type (set at fulfillment)
   walletId?: number; // Deprecated: use derivationIndex
   derivationIndex?: number; // HD wallet derivation index
@@ -62,6 +63,7 @@ export interface UpdateSessionData {
   rate?: number;
   assetPrice?: number;
   chargeAmount?: number;
+  chargeFrom?: 'fiat' | 'crypto';
   depositAddress?: string;
   walletId?: number;
   derivationIndex?: number;
@@ -84,6 +86,7 @@ function rowToSession(row: any): PaymentSession {
     rate: Number(row.rate),
     assetPrice: Number(row.asset_price),
     chargeAmount: Number(row.charge_amount),
+    chargeFrom: (row.charge_from || 'crypto') as 'fiat' | 'crypto',
     depositAddress: row.deposit_address,
     walletId: row.wallet_id ? Number(row.wallet_id) : undefined,
     derivationIndex: row.derivation_index ? Number(row.derivation_index) : undefined,
@@ -118,13 +121,13 @@ export class SessionRepository {
         `INSERT INTO payment_sessions (
           id, reference, type, status,
           fiat_amount, fiat_currency, transaction_usd, crypto_amount, crypto, network,
-          rate, asset_price, charge_amount,
+          rate, asset_price, charge_amount, charge_from,
           deposit_address, wallet_id, derivation_index, hd_chain,
           funding_wallet_index, parent_wallet,
           payer_id, receiver_id, merchant_id, api_key_id, is_sandbox,
           expires_at, created_at, updated_at,
           metadata, bank_ref
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.id,
           data.reference,
@@ -139,6 +142,7 @@ export class SessionRepository {
           data.rate ?? null,
           data.assetPrice ?? null,
           data.chargeAmount ?? null,
+          data.chargeFrom ?? 'crypto',
           data.depositAddress ?? null,
           data.walletId || null,
           data.derivationIndex || null,
@@ -365,6 +369,10 @@ export class SessionRepository {
     if (data.chargeAmount !== undefined) {
       updates.push('charge_amount = ?');
       values.push(data.chargeAmount);
+    }
+    if (data.chargeFrom !== undefined) {
+      updates.push('charge_from = ?');
+      values.push(data.chargeFrom);
     }
     if (data.depositAddress !== undefined) {
       updates.push('deposit_address = ?');

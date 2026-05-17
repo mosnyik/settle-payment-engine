@@ -36,8 +36,6 @@ export class EVMSweeper implements ChainSweeper {
         };
       }
 
-      // Estimate gas
-      const gasLimit = 21000n; // Standard ETH transfer
       const feeData = await this.provider.getFeeData();
 
       let gasPrice: bigint;
@@ -53,6 +51,12 @@ export class EVMSweeper implements ChainSweeper {
         gasPrice = feeData.gasPrice || 0n;
       }
 
+      const estimatedGas = await this.provider.estimateGas({
+        from: params.fromAddress,
+        to: params.toAddress,
+        value: balance > 1n ? 1n : 0n,
+      });
+      const gasLimit = estimatedGas + estimatedGas / 10n; // 10% buffer for contract recipients
       const gasCost = gasLimit * gasPrice;
       const sendAmount = balance - gasCost;
 
@@ -112,7 +116,22 @@ export class EVMSweeper implements ChainSweeper {
   async estimateFee(params: ChainSweepParams): Promise<string> {
     const feeData = await this.provider.getFeeData();
     const gasPrice = feeData.maxFeePerGas || feeData.gasPrice || 0n;
-    const gasLimit = 21000n;
+    let gasLimit = 21000n;
+
+    try {
+      const balance = await this.provider.getBalance(params.fromAddress);
+      if (balance > 0n) {
+        const estimatedGas = await this.provider.estimateGas({
+          from: params.fromAddress,
+          to: params.toAddress,
+          value: balance > 1n ? 1n : 0n,
+        });
+        gasLimit = estimatedGas + estimatedGas / 10n;
+      }
+    } catch {
+      // Keep the standard native transfer estimate when RPC estimation is unavailable.
+    }
+
     const gasCost = gasLimit * gasPrice;
 
     return formatEther(gasCost);

@@ -9,6 +9,7 @@ interface ExchangeRate extends RowDataPacket {
   current_rate: string | number;
   merchant_rate: string | number;
   profit_rate?: string | number;
+  update_at?: Date | string | null;
 }
 
 // GET /rate
@@ -109,6 +110,9 @@ router.get("/all", async (req: Request, res: Response, next: NextFunction) => {
       rateNumeric: adjustedRate,
       merchantRate,
       profitRate,
+      updatedAt: result.update_at
+        ? new Date(result.update_at).toISOString()
+        : null,
     });
   } catch (err: any) {
     console.error("Error querying rates:", err);

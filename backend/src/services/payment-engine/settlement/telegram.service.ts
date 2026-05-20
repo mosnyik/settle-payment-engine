@@ -312,7 +312,6 @@ After manual payment, use the buttons below.
       inline_keyboard: [
         [
           { text: 'Settlement completed', callback_data: `settle:${reference}` },
-          { text: 'Not completed', callback_data: `not_settled:${reference}` },
         ],
       ],
     };

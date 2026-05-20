@@ -138,15 +138,6 @@ router.post('/telegram', async (req: Request, res: Response) => {
       return res.json({ success: true });
     }
 
-    const notSettledMatch = callbackData.match(/^not_settled:(.+)$/);
-    if (notSettledMatch) {
-      const reference = notSettledMatch[1];
-      const escapedReference = escapeTelegramHtml(reference);
-      await telegramService.answerCallbackQuery(callbackQueryId, 'Payment left in settling.');
-      await telegramService.sendMessage(`<b>Manual settlement not completed</b>\n\n<b>Session:</b> ${escapedReference}\nStatus was not changed.`);
-      return res.json({ success: true });
-    }
-
     await telegramService.answerCallbackQuery(callbackQueryId, 'Unknown settlement action.', true);
     return res.json({ success: true });
   } catch (error) {

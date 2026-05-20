@@ -76,9 +76,13 @@ interface EtherscanInternalTx {
  * Supports native ETH and ERC20 token transfers.
  */
 export class EthereumAdapter extends ChainAdapter {
+  private static readonly rateLimitQueues = new Map<string, Promise<void>>();
+  private static readonly rateLimitLastCallTimes = new Map<string, number>();
+
   private readonly client: AxiosInstance;
   private readonly apiKey: string;
   private readonly chainId: number;
+  private readonly rateLimitKey: string;
   private cachedBlockNumber: number = 0;
   private blockNumberCacheTime: number = 0;
   private readonly BLOCK_CACHE_TTL_MS = 12000; // 12 seconds (~1 block)
@@ -91,10 +95,44 @@ export class EthereumAdapter extends ChainAdapter {
 
     // Use V2 API endpoint
     const baseURL = config.apiUrl || 'https://api.etherscan.io/v2/api';
+    this.rateLimitKey = `${baseURL}:${this.apiKey || 'anonymous'}`;
     this.client = axios.create({
       baseURL,
       timeout: 30000,
     });
+  }
+
+  /**
+   * Etherscan V2 rate limits are applied per API key across supported chains.
+   * Ethereum and BSC adapters therefore need to share one limiter.
+   */
+  protected async enforceRateLimit(): Promise<void> {
+    if (!this.config.rateLimitMs) return;
+
+    const previous = EthereumAdapter.rateLimitQueues.get(this.rateLimitKey) ?? Promise.resolve();
+    let release!: () => void;
+    EthereumAdapter.rateLimitQueues.set(
+      this.rateLimitKey,
+      new Promise((resolve) => {
+        release = resolve;
+      })
+    );
+
+    await previous;
+
+    try {
+      const lastCallTime = EthereumAdapter.rateLimitLastCallTimes.get(this.rateLimitKey) ?? 0;
+      const elapsed = Date.now() - lastCallTime;
+      const remaining = this.config.rateLimitMs - elapsed;
+
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+
+      EthereumAdapter.rateLimitLastCallTimes.set(this.rateLimitKey, Date.now());
+    } finally {
+      release();
+    }
   }
 
   /**

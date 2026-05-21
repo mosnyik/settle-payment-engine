@@ -9,6 +9,7 @@
  *   npx tsx scripts/sync-paystack-banks.ts
  *   npx tsx scripts/sync-paystack-banks.ts --dry-run
  *   npx tsx scripts/sync-paystack-banks.ts --db-host=localhost --db-user=root --db-password=secret --db-name=2settle
+ *   npx tsx scripts/sync-paystack-banks.ts --host localhost --user root --password secret --db 2settle
  *
  * Prerequisites:
  *   ALTER TABLE banks ADD COLUMN IF NOT EXISTS paystack_code VARCHAR(20) NULL;
@@ -37,11 +38,16 @@ function getArg(name: string): string | undefined {
 
 const dbArgMap: Array<[string, string]> = [
   ['--db-host', 'DB_HOST'],
+  ['--host', 'DB_HOST'],
   ['--db-port', 'DB_PORT'],
+  ['--port', 'DB_PORT'],
   ['--db-user', 'DB_USER'],
+  ['--user', 'DB_USER'],
   ['--db-password', 'DB_PASSWORD'],
+  ['--password', 'DB_PASSWORD'],
   ['--db-name', 'DB_NAME'],
   ['--db-database', 'DB_NAME'],
+  ['--db', 'DB_NAME'],
 ];
 
 for (const [argName, envName] of dbArgMap) {

@@ -556,6 +556,68 @@ router.post(
 );
 
 // =============================================================================
+// CANCEL PAYMENT
+// =============================================================================
+
+/**
+ * POST /payments/:reference/cancel
+ *
+ * User-initiated cancellation before the payment expires.
+ * Only created or pending, non-expired sessions can be cancelled.
+ * Requires 'payment:create' permission.
+ */
+router.post(
+  '/:reference/cancel',
+  requirePermission('payment:create'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { reference } = req.params;
+
+      if (!reference) {
+        return res.status(400).json({
+          success: false,
+          error: 'Reference is required',
+        });
+      }
+
+      const session = await paymentEngine.getPaymentByReference(reference);
+
+      if (session.apiKeyId && req.apiKey?.id && session.apiKeyId !== req.apiKey.id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Payment does not belong to this API key',
+          code: 'FORBIDDEN',
+        });
+      }
+
+      const cancelledSession = await paymentEngine.cancelPayment(session.id);
+      await legacySyncService.syncToLegacy(cancelledSession);
+
+      return res.json({
+        success: true,
+        message: 'Payment cancelled successfully',
+        payment: {
+          id: cancelledSession.id,
+          reference: cancelledSession.reference,
+          type: cancelledSession.type,
+          status: cancelledSession.status,
+          expiresAt: cancelledSession.expiresAt,
+        },
+      });
+    } catch (err) {
+      if (err instanceof PaymentEngineError) {
+        return res.status(err.statusCode).json({
+          success: false,
+          error: err.message,
+          code: err.code,
+        });
+      }
+      next(err);
+    }
+  }
+);
+
+// =============================================================================
 // CONFIRM SELF-SETTLEMENT
 // =============================================================================
 

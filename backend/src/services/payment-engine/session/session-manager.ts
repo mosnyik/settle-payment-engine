@@ -572,6 +572,28 @@ export class SessionManager {
     return this.repository.update(id, { status: 'expired' });
   }
 
+  async cancelSession(id: string): Promise<PaymentSession> {
+    const session = await this.getSession(id);
+
+    if (session.status !== 'pending' && session.status !== 'created') {
+      throw new InvalidSessionStateError(
+        session.status,
+        'cancel',
+        ['pending', 'created']
+      );
+    }
+
+    if (session.expiresAt.getTime() <= Date.now()) {
+      throw new InvalidSessionStateError(
+        'expired',
+        'cancel',
+        ['pending before expiry', 'created before expiry']
+      );
+    }
+
+    return this.expireSession(id);
+  }
+
   async failSession(id: string): Promise<PaymentSession> {
     const session = await this.getSession(id);
 

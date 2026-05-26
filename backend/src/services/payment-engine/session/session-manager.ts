@@ -664,10 +664,36 @@ export class SessionManager {
     let expiresAt: Date;
 
     if (hdWallet?.isEnabled()) {
-      const derivation = await hdWallet.deriveNextAddress(network as any);
-      depositAddress = derivation.address;
-      derivationIndex = derivation.derivationIndex;
-      hdChain = derivation.chain;
+      const receiverWallet = session.receiverId
+        ? await participantService.getReceiverChainWallet(
+            session.receiverId,
+            network as any
+          )
+        : null;
+
+      if (receiverWallet) {
+        depositAddress = receiverWallet.address;
+        derivationIndex = receiverWallet.derivationIndex;
+        hdChain = receiverWallet.hdChain;
+      } else {
+        const derivation = await hdWallet.deriveNextAddress(network as any);
+        depositAddress = derivation.address;
+        derivationIndex = derivation.derivationIndex;
+        hdChain = derivation.chain;
+
+        if (session.receiverId) {
+          await participantService.saveReceiverChainWallet(
+            session.receiverId,
+            network as any,
+            {
+              address: derivation.address,
+              derivationIndex: derivation.derivationIndex,
+              hdChain: derivation.chain,
+            }
+          );
+        }
+      }
+
       expiresAt = new Date(Date.now() + this.config.sessionTtlMinutes * 60 * 1000);
     } else {
       const wallet = await assignWallet(

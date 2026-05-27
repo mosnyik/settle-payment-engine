@@ -10,6 +10,7 @@ import {
   PaymentEngineConfig,
 } from '../types';
 import {
+  DepositAddressInUseError,
   InvalidInputError,
   InvalidSessionStateError,
   SessionNotFoundError,
@@ -20,6 +21,7 @@ import { lockRate } from '../rate';
 import { calculateCharges, calculateChargesFromCrypto } from '../charges';
 import { assignWallet, releaseWallet } from '../wallet';
 import { getHDWalletService } from '../hd-wallet';
+import { sessionOwnerService } from '../session-owner';
 import { SessionRepository, sessionRepository, UpdateSessionData, CreateSessionData } from './session-repository';
 import { getDepositWatcher } from '../watcher';
 
@@ -131,6 +133,12 @@ function isValidTransition(from: PaymentStatus, to: PaymentStatus): boolean {
   return VALID_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
+function usesLegacyWalletPool(
+  session: PaymentSession
+): session is PaymentSession & { walletId: number; network: NonNullable<PaymentSession['network']> } {
+  return Boolean(session.walletId && session.derivationIndex === undefined && session.network);
+}
+
 export class SessionManager {
   private repository: SessionRepository;
   private config: PaymentEngineConfig;
@@ -141,6 +149,22 @@ export class SessionManager {
   ) {
     this.repository = repository;
     this.config = config;
+  }
+
+  private async assertDepositAddressAvailable(
+    depositAddress: string,
+    crypto?: PaymentSession['crypto'],
+    excludeSessionId?: string
+  ): Promise<void> {
+    const activeSession = await this.repository.findActiveByDepositAddress(
+      depositAddress,
+      crypto,
+      excludeSessionId
+    );
+
+    if (activeSession) {
+      throw new DepositAddressInUseError(depositAddress, activeSession.id);
+    }
   }
 
   private calculateActualReceivedUpdate(
@@ -250,6 +274,8 @@ export class SessionManager {
         apiKeyId: resolvedInput.apiKeyId,
         fundingWalletIndex: resolvedInput.fundingWalletIndex,
         parentWallet: resolvedInput.parentWallet,
+        receiverId: resolvedInput.receiverId,
+        sessionOwnerId: resolvedInput.sessionOwnerId,
         expiresAt,
         metadata: resolvedInput.metadata,
         bankRef: resolvedInput.bankRef,
@@ -284,11 +310,37 @@ export class SessionManager {
     let expiresAt: Date;
 
     if (hdWallet?.isEnabled()) {
-      // Use HD wallet derivation
-      const derivation = await hdWallet.deriveNextAddress(resolvedInput.network!);
-      depositAddress = derivation.address;
-      derivationIndex = derivation.derivationIndex;
-      hdChain = derivation.chain;
+      const ownerWallet = resolvedInput.sessionOwnerId
+        ? await sessionOwnerService.getSessionOwnerChainWallet(
+            resolvedInput.sessionOwnerId,
+            resolvedInput.network!
+          )
+        : null;
+
+      if (ownerWallet) {
+        depositAddress = ownerWallet.address;
+        derivationIndex = ownerWallet.derivationIndex;
+        hdChain = ownerWallet.hdChain;
+        await this.assertDepositAddressAvailable(depositAddress, resolvedInput.crypto);
+      } else {
+        const derivation = await hdWallet.deriveNextAddress(resolvedInput.network!);
+        depositAddress = derivation.address;
+        derivationIndex = derivation.derivationIndex;
+        hdChain = derivation.chain;
+
+        if (resolvedInput.sessionOwnerId) {
+          await sessionOwnerService.saveSessionOwnerChainWallet(
+            resolvedInput.sessionOwnerId,
+            resolvedInput.network!,
+            {
+              address: derivation.address,
+              derivationIndex: derivation.derivationIndex,
+              hdChain: derivation.chain,
+            }
+          );
+        }
+      }
+
       expiresAt = new Date(Date.now() + this.config.sessionTtlMinutes * 60 * 1000);
     } else {
       // Fall back to legacy wallet pool
@@ -321,6 +373,8 @@ export class SessionManager {
       hdChain: hdChain as any,
       fundingWalletIndex: resolvedInput.fundingWalletIndex,
       parentWallet: resolvedInput.parentWallet,
+      receiverId: resolvedInput.receiverId,
+      sessionOwnerId: resolvedInput.sessionOwnerId,
       merchantId: resolvedInput.merchantId,
       apiKeyId: resolvedInput.apiKeyId,
       expiresAt,
@@ -432,7 +486,7 @@ export class SessionManager {
     }
 
     // Only release wallet if using legacy wallet pool (not HD wallet)
-    if (session.walletId && !session.derivationIndex && session.network) {
+    if (usesLegacyWalletPool(session)) {
       await releaseWallet(session.walletId, session.network);
     }
 
@@ -516,8 +570,8 @@ export class SessionManager {
       );
     }
 
-    // Only release wallet if using legacy wallet pool (not HD wallet) and has network
-    if (session.walletId && !session.derivationIndex && session.network) {
+    // Only release wallet if using legacy wallet pool (not HD wallet)
+    if (usesLegacyWalletPool(session)) {
       await releaseWallet(session.walletId, session.network);
     }
 
@@ -526,6 +580,28 @@ export class SessionManager {
     watcher?.unwatchSession(id);
 
     return this.repository.update(id, { status: 'expired' });
+  }
+
+  async cancelSession(id: string): Promise<PaymentSession> {
+    const session = await this.getSession(id);
+
+    if (session.status !== 'pending' && session.status !== 'created') {
+      throw new InvalidSessionStateError(
+        session.status,
+        'cancel',
+        ['pending', 'created']
+      );
+    }
+
+    if (session.expiresAt.getTime() <= Date.now()) {
+      throw new InvalidSessionStateError(
+        'expired',
+        'cancel',
+        ['pending before expiry', 'created before expiry']
+      );
+    }
+
+    return this.expireSession(id);
   }
 
   async failSession(id: string): Promise<PaymentSession> {
@@ -539,9 +615,9 @@ export class SessionManager {
       );
     }
 
-    // Only release wallet if using legacy wallet pool (not HD wallet) and has network
+    // Only release wallet if using legacy wallet pool (not HD wallet)
     if ((session.status === 'pending' || session.status === 'confirming') &&
-        session.walletId && !session.derivationIndex && session.network) {
+        usesLegacyWalletPool(session)) {
       await releaseWallet(session.walletId, session.network);
     }
 
@@ -591,7 +667,8 @@ export class SessionManager {
   async fulfillRequest(
     sessionId: string,
     crypto: string,
-    network: string
+    network: string,
+    sessionOwnerId?: number
   ): Promise<PaymentSession> {
     const session = await this.getSession(sessionId);
 
@@ -636,10 +713,37 @@ export class SessionManager {
     let expiresAt: Date;
 
     if (hdWallet?.isEnabled()) {
-      const derivation = await hdWallet.deriveNextAddress(network as any);
-      depositAddress = derivation.address;
-      derivationIndex = derivation.derivationIndex;
-      hdChain = derivation.chain;
+      const ownerWallet = sessionOwnerId
+        ? await sessionOwnerService.getSessionOwnerChainWallet(
+            sessionOwnerId,
+            network as any
+          )
+        : null;
+
+      if (ownerWallet) {
+        depositAddress = ownerWallet.address;
+        derivationIndex = ownerWallet.derivationIndex;
+        hdChain = ownerWallet.hdChain;
+        await this.assertDepositAddressAvailable(depositAddress, crypto as any, sessionId);
+      } else {
+        const derivation = await hdWallet.deriveNextAddress(network as any);
+        depositAddress = derivation.address;
+        derivationIndex = derivation.derivationIndex;
+        hdChain = derivation.chain;
+
+        if (sessionOwnerId) {
+          await sessionOwnerService.saveSessionOwnerChainWallet(
+            sessionOwnerId,
+            network as any,
+            {
+              address: derivation.address,
+              derivationIndex: derivation.derivationIndex,
+              hdChain: derivation.chain,
+            }
+          );
+        }
+      }
+
       expiresAt = new Date(Date.now() + this.config.sessionTtlMinutes * 60 * 1000);
     } else {
       const wallet = await assignWallet(
@@ -662,6 +766,7 @@ export class SessionManager {
       chargeAmount: charges.fiatCharge,
       chargeFrom: charges.chargeFrom,
       transactionUsd: rateLock.rate ? charges.netFiatAmount / rateLock.rate : undefined,
+      sessionOwnerId,
       depositAddress,
       walletId,
       derivationIndex,

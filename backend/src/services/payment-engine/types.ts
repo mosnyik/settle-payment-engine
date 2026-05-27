@@ -64,6 +64,15 @@ export interface ReceiverInput {
   accountName: string;
   bankName?: string;
   phone?: string;
+  walletAddress?: string;
+}
+
+export interface SessionOwnerInput {
+  ownerScope: string;
+  ownerRef: string;
+  phone?: string;
+  walletAddress?: string;
+  email?: string;
 }
 
 export interface CreatePaymentInput {
@@ -76,6 +85,9 @@ export interface CreatePaymentInput {
   network?: Network; // Optional for request type (provided at fulfillment)
   payer?: PayerInput; // Optional for request type
   receiver?: ReceiverInput;
+  receiverId?: number;
+  /** Internal owner of the reusable payment-session deposit wallet. */
+  sessionOwnerId?: number;
   merchantId?: string;
   merchantReference?: string;
   callbackUrl?: string;
@@ -136,6 +148,7 @@ export interface PaymentSession {
   parentWallet?: string; // Sweep destination (from API key's parent wallet for the chain)
   payerId?: number;
   receiverId?: number;
+  sessionOwnerId?: number;
   merchantId?: string;
   apiKeyId?: number;
   txHash?: string;

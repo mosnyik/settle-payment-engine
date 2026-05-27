@@ -48,10 +48,12 @@ Dry run:
   pnpm recover:hd-sweep -- --session-id SESSION_ID --to T_DESTINATION
   pnpm recover:hd-sweep -- --address T_DEPOSIT --index 12 --to T_DESTINATION
   pnpm recover:hd-sweep -- --reference PAY_xxx --asset trx --to T_DESTINATION
+  pnpm recover:hd-sweep -- --reference PAY_xxx --asset trx --to T_DESTINATION --host YOUR_HOST --user YOUR_USER --password YOUR_PASSWORD --db YOUR_DB
 
 Broadcast:
   pnpm recover:hd-sweep -- --reference PAY_xxx --to T_DESTINATION --execute
   pnpm recover:hd-sweep -- --reference PAY_xxx --asset trx --to T_DESTINATION --execute
+  pnpm recover:hd-sweep -- --reference PAY_xxx --asset trx --to T_DESTINATION --execute --db-host YOUR_HOST --db-user YOUR_USER --db-password YOUR_PASSWORD --db-name YOUR_DB
 
 Options:
   --reference <ref>             Payment session reference.

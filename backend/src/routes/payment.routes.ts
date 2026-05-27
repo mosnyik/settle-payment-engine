@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import { paymentEngine } from '../services/payment-engine';
 import { participantService } from '../services/payment-engine/participant';
+import { getSessionOwnerScope, sessionOwnerService } from '../services/payment-engine/session-owner';
 import { legacySyncService } from '../services/payment-engine/sync';
 import {
   createPaymentSchema,
@@ -70,6 +71,8 @@ router.post(
     // bankName and accountName are always resolved server-side — never trusted from client.
     // Sandbox keys skip real NUBAN verification — use placeholder values.
     let resolvedReceiver: { bankCode: string; accountNumber: string; accountName: string; bankName: string } | undefined;
+    let receiverId: number | undefined;
+    let sessionOwnerId: number | undefined;
     if (input.receiver) {
       if (apiKey?.isSandbox) {
         resolvedReceiver = {
@@ -84,6 +87,24 @@ router.post(
           input.receiver.accountNumber
         );
       }
+
+      receiverId = await participantService.getOrCreateReceiver({
+        bankCode: resolvedReceiver.bankCode,
+        accountNumber: resolvedReceiver.accountNumber,
+        accountName: resolvedReceiver.accountName,
+        bankName: resolvedReceiver.bankName,
+        phone: input.receiver.phone,
+        walletAddress: input.receiver.walletAddress,
+      });
+    }
+
+    if (input.payer?.chatId) {
+      sessionOwnerId = await sessionOwnerService.getOrCreateSessionOwner({
+        ownerScope: getSessionOwnerScope(apiKey?.id),
+        ownerRef: input.payer.chatId,
+        phone: input.payer.phone,
+        walletAddress: input.payer.walletAddress,
+      });
     }
 
     // Create payment session via PaymentEngine
@@ -104,7 +125,11 @@ router.post(
         accountNumber: resolvedReceiver.accountNumber,
         accountName: resolvedReceiver.accountName,
         bankName: resolvedReceiver.bankName,
+        phone: input.receiver?.phone,
+        walletAddress: input.receiver?.walletAddress,
       } : undefined,
+      receiverId,
+      sessionOwnerId,
       merchantId: input.merchantId,
       merchantReference: input.merchantReference,
       callbackUrl: input.callbackUrl,
@@ -122,16 +147,6 @@ router.post(
     if (input.payer) {
       const payerId = await participantService.getOrCreatePayer(input.payer);
       await paymentEngine.setPayerId(session.id, payerId);
-    }
-
-    if (resolvedReceiver) {
-      const receiverId = await participantService.getOrCreateReceiver({
-        bankCode: resolvedReceiver.bankCode,
-        accountNumber: resolvedReceiver.accountNumber,
-        accountName: resolvedReceiver.accountName,
-        bankName: resolvedReceiver.bankName,
-      } as any);
-      await paymentEngine.setReceiverId(session.id, receiverId);
     }
 
     // Auto-settle: record the payment as settled immediately.
@@ -492,11 +507,19 @@ router.post(
         });
       }
 
+      const sessionOwnerId = await sessionOwnerService.getOrCreateSessionOwner({
+        ownerScope: getSessionOwnerScope(req.apiKey?.id),
+        ownerRef: parsed.data.payer.chatId,
+        phone: parsed.data.payer.phone,
+        walletAddress: parsed.data.payer.walletAddress,
+      });
+
       // Fulfill request - this locks rate, calculates crypto amount, assigns wallet
       const fulfilledSession = await paymentEngine.fulfillRequest(
         session.id,
         parsed.data.crypto,
-        parsed.data.network
+        parsed.data.network,
+        sessionOwnerId
       );
 
       // Create/get payer and link to session
@@ -537,6 +560,68 @@ router.post(
           rate: updatedSession.rate,
           charge: fulfillChargeBreakdown,
           expiresAt: updatedSession.expiresAt,
+        },
+      });
+    } catch (err) {
+      if (err instanceof PaymentEngineError) {
+        return res.status(err.statusCode).json({
+          success: false,
+          error: err.message,
+          code: err.code,
+        });
+      }
+      next(err);
+    }
+  }
+);
+
+// =============================================================================
+// CANCEL PAYMENT
+// =============================================================================
+
+/**
+ * POST /payments/:reference/cancel
+ *
+ * User-initiated cancellation before the payment expires.
+ * Only created or pending, non-expired sessions can be cancelled.
+ * Requires 'payment:create' permission.
+ */
+router.post(
+  '/:reference/cancel',
+  requirePermission('payment:create'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { reference } = req.params;
+
+      if (!reference) {
+        return res.status(400).json({
+          success: false,
+          error: 'Reference is required',
+        });
+      }
+
+      const session = await paymentEngine.getPaymentByReference(reference);
+
+      if (session.apiKeyId && req.apiKey?.id && session.apiKeyId !== req.apiKey.id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Payment does not belong to this API key',
+          code: 'FORBIDDEN',
+        });
+      }
+
+      const cancelledSession = await paymentEngine.cancelPayment(session.id);
+      await legacySyncService.syncToLegacy(cancelledSession);
+
+      return res.json({
+        success: true,
+        message: 'Payment cancelled successfully',
+        payment: {
+          id: cancelledSession.id,
+          reference: cancelledSession.reference,
+          type: cancelledSession.type,
+          status: cancelledSession.status,
+          expiresAt: cancelledSession.expiresAt,
         },
       });
     } catch (err) {

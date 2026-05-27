@@ -1,7 +1,9 @@
 /**
  * Simulate Deposit Script
  *
- * Usage: npx ts-node scripts/simulate-deposit.ts <wallet_id> [amount]
+ * Sample commands:
+ *   pnpm exec tsx scripts/simulate-deposit.ts wal_abc123
+ *   pnpm exec tsx scripts/simulate-deposit.ts wal_abc123 50.5
  *
  * This script simulates a deposit being detected on a wallet,
  * useful for testing webhooks without real blockchain transactions.
@@ -16,9 +18,9 @@ async function simulateDeposit() {
   const txHash = `sim_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
   if (!walletId) {
-    console.log('Usage: npx ts-node scripts/simulate-deposit.ts <wallet_id> [amount]');
+    console.log('Usage: pnpm exec tsx scripts/simulate-deposit.ts <wallet_id> [amount]');
     console.log('');
-    console.log('Example: npx ts-node scripts/simulate-deposit.ts wal_abc123 50.5');
+    console.log('Example: pnpm exec tsx scripts/simulate-deposit.ts wal_abc123 50.5');
     process.exit(1);
   }
 

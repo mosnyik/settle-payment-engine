@@ -212,6 +212,19 @@ export class PaymentEngine {
   }
 
   /**
+   * Cancel an active payment before it expires.
+   *
+   * Intended for user-initiated cancellation from the frontend.
+   * Only created or pending sessions that have not expired can be cancelled.
+   *
+   * @param id - The payment ID
+   * @returns The updated payment session
+   */
+  async cancelPayment(id: string): Promise<PaymentSession> {
+    return this.manager.cancelSession(id);
+  }
+
+  /**
    * Mark a payment as failed.
    *
    * Called when something goes wrong that can't be recovered.
@@ -361,9 +374,10 @@ export class PaymentEngine {
   async fulfillRequest(
     paymentId: string,
     crypto: string,
-    network: string
+    network: string,
+    sessionOwnerId?: number
   ): Promise<PaymentSession> {
-    return this.manager.fulfillRequest(paymentId, crypto, network);
+    return this.manager.fulfillRequest(paymentId, crypto, network, sessionOwnerId);
   }
 }
 

@@ -90,6 +90,23 @@ export class RateLockExpiredError extends PaymentEngineError {
   }
 }
 
+export class DepositAddressInUseError extends PaymentEngineError {
+  readonly depositAddress: string;
+  readonly activeSessionId: string;
+
+  constructor(depositAddress: string, activeSessionId: string) {
+    super(
+      `Deposit address ${depositAddress} is already assigned to active session ${activeSessionId}`,
+      'DEPOSIT_ADDRESS_IN_USE',
+      409
+    );
+    this.depositAddress = depositAddress;
+    this.activeSessionId = activeSessionId;
+  }
+}
+
+export class ReceiverWalletInUseError extends DepositAddressInUseError {}
+
 // Resource unavailable errors (503)
 export class WalletPoolEmptyError extends PaymentEngineError {
   readonly network: string;

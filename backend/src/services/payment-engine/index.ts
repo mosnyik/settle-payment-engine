@@ -32,6 +32,8 @@ export {
   SessionNotFoundError,
   InvalidSessionStateError,
   RateLockExpiredError,
+  DepositAddressInUseError,
+  ReceiverWalletInUseError,
   WalletPoolEmptyError,
   RateServiceUnavailableError,
   SettlementFailedError,

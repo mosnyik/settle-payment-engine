@@ -1,7 +1,9 @@
 /**
  * Manual Watcher Test Script
  *
- * Usage: npx ts-node scripts/test-watcher.ts
+ * Sample commands:
+ *   pnpm exec tsx scripts/test-watcher.ts
+ *   WATCHER_ENABLED=true pnpm exec tsx scripts/test-watcher.ts
  *
  * This script:
  * 1. Initializes the watcher

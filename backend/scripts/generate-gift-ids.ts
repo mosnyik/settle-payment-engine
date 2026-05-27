@@ -1,3 +1,13 @@
+/**
+ * Generate gift payment sessions.
+ *
+ * Sample commands:
+ *   pnpm run generate:gift-ids -- --count 5 --amount 5000
+ *   pnpm run generate:gift-ids -- --count 5 --amount 5000 --apply
+ *   pnpm run generate:gift-ids -- --count 5 --amount 5000 --crypto USDT --network trc20 --charge-from crypto --apply
+ *   pnpm run generate:gift-ids -- --count 5 --amount 5000 --host YOUR_HOST --user YOUR_USER --password YOUR_PASSWORD --db YOUR_DB --apply
+ */
+
 import fs from 'fs';
 import path from 'path';
 

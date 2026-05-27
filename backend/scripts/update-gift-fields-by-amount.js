@@ -1,3 +1,13 @@
+/**
+ * Update gift fields for all gifts with a matching amount_payable value.
+ *
+ * Sample commands:
+ *   pnpm run update:gift-fields-by-amount -- --amount 5000
+ *   pnpm run update:gift-fields-by-amount -- --amount 5000 --crypto-amount 4.03375422 --current-rate 1363.4941 --charges 500.00000000
+ *   pnpm run update:gift-fields-by-amount -- --amount 5000 --crypto-amount 4.03375422 --current-rate 1363.4941 --charges 500.00000000 --apply
+ *   pnpm run update:gift-fields-by-amount -- --amount 5000 --host YOUR_HOST --user YOUR_USER --password YOUR_PASSWORD --db YOUR_DB --apply
+ */
+
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');

@@ -30,7 +30,12 @@ const NETWORKS = [
 // PARTICIPANT SCHEMAS
 // =============================================================================
 
-/** Payer input schema */
+/**
+ * Payer input schema.
+ *
+ * payer.chatId is also used internally as the session-owner identity for
+ * reusable payment-session deposit wallets when a payer is present.
+ */
 export const payerInputSchema = z.object({
   chatId: z.string().min(1, 'Chat ID is required'),
   phone: z.string().optional(),
@@ -46,6 +51,7 @@ export const receiverInputSchema = z.object({
   bankCode: z.string().min(1, 'Bank code is required'),
   accountNumber: z.string().min(1, 'Account number is required'),
   phone: z.string().optional(),
+  walletAddress: z.string().optional(),
 });
 
 // =============================================================================
@@ -272,10 +278,13 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
       break;
 
     case 'merchant':
+      // payer is optional for backwards compatibility. When provided,
+      // payer.chatId identifies the customer paying crypto for wallet reuse.
       break;
 
     case 'bank_confirmation':
-      // No payer or receiver required — bank handles user identity and fiat disbursement
+      // payer is optional for backwards compatibility. When provided,
+      // payer.chatId identifies the person paying crypto for wallet reuse.
       break;
   }
 });

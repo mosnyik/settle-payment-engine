@@ -22,6 +22,7 @@ import { calculateCharges, calculateChargesFromCrypto } from '../charges';
 import { assignWallet, releaseWallet } from '../wallet';
 import { getHDWalletService } from '../hd-wallet';
 import { participantService } from '../participant/participant.service';
+import { sessionOwnerService } from '../session-owner';
 import { SessionRepository, sessionRepository, UpdateSessionData, CreateSessionData } from './session-repository';
 import { getDepositWatcher } from '../watcher';
 
@@ -302,17 +303,17 @@ export class SessionManager {
     let expiresAt: Date;
 
     if (hdWallet?.isEnabled()) {
-      const receiverWallet = resolvedInput.receiverId
-        ? await participantService.getReceiverChainWallet(
-            resolvedInput.receiverId,
+      const ownerWallet = resolvedInput.sessionOwnerId
+        ? await sessionOwnerService.getSessionOwnerChainWallet(
+            resolvedInput.sessionOwnerId,
             resolvedInput.network!
           )
         : null;
 
-      if (receiverWallet) {
-        depositAddress = receiverWallet.address;
-        derivationIndex = receiverWallet.derivationIndex;
-        hdChain = receiverWallet.hdChain;
+      if (ownerWallet) {
+        depositAddress = ownerWallet.address;
+        derivationIndex = ownerWallet.derivationIndex;
+        hdChain = ownerWallet.hdChain;
         await this.assertDepositAddressAvailable(depositAddress);
       } else {
         const derivation = await hdWallet.deriveNextAddress(resolvedInput.network!);
@@ -320,9 +321,9 @@ export class SessionManager {
         derivationIndex = derivation.derivationIndex;
         hdChain = derivation.chain;
 
-        if (resolvedInput.receiverId) {
-          await participantService.saveReceiverChainWallet(
-            resolvedInput.receiverId,
+        if (resolvedInput.sessionOwnerId) {
+          await sessionOwnerService.saveSessionOwnerChainWallet(
+            resolvedInput.sessionOwnerId,
             resolvedInput.network!,
             {
               address: derivation.address,

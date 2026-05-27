@@ -83,13 +83,13 @@ vi.mock('@/services/payment-engine/hd-wallet', () => ({
   getHDWalletService: vi.fn(() => hdWalletMock.service),
 }));
 
-const participantServiceMock = vi.hoisted(() => ({
-  getReceiverChainWallet: vi.fn(),
-  saveReceiverChainWallet: vi.fn(),
+const sessionOwnerServiceMock = vi.hoisted(() => ({
+  getSessionOwnerChainWallet: vi.fn(),
+  saveSessionOwnerChainWallet: vi.fn(),
 }));
 
-vi.mock('@/services/payment-engine/participant/participant.service', () => ({
-  participantService: participantServiceMock,
+vi.mock('@/services/payment-engine/session-owner', () => ({
+  sessionOwnerService: sessionOwnerServiceMock,
 }));
 
 // Mock ID generator
@@ -224,8 +224,8 @@ describe('SessionManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hdWalletMock.service = null;
-    participantServiceMock.getReceiverChainWallet.mockResolvedValue(null);
-    participantServiceMock.saveReceiverChainWallet.mockResolvedValue(undefined);
+    sessionOwnerServiceMock.getSessionOwnerChainWallet.mockResolvedValue(null);
+    sessionOwnerServiceMock.saveSessionOwnerChainWallet.mockResolvedValue(undefined);
     mockRepo = createMockRepository();
     manager = new SessionManager(mockRepo as any);
   });
@@ -282,38 +282,39 @@ describe('SessionManager', () => {
       expect(mockRepo.create).toHaveBeenCalled();
     });
 
-    it('should reuse an existing receiver chain wallet when HD wallet is enabled', async () => {
+    it('should reuse an existing session owner chain wallet when HD wallet is enabled', async () => {
       const hdWallet = enableHDWallet();
-      participantServiceMock.getReceiverChainWallet.mockResolvedValue({
+      sessionOwnerServiceMock.getSessionOwnerChainWallet.mockResolvedValue({
         address: '0xReusableReceiverWallet',
         derivationIndex: 8,
         hdChain: 'ethereum',
       });
 
-      await manager.createSession({ ...validInput, receiverId: 42 });
+      await manager.createSession({ ...validInput, receiverId: 42, sessionOwnerId: 7 });
 
-      expect(participantServiceMock.getReceiverChainWallet).toHaveBeenCalledWith(42, 'bep20');
+      expect(sessionOwnerServiceMock.getSessionOwnerChainWallet).toHaveBeenCalledWith(7, 'bep20');
       expect(mockRepo.findActiveByDepositAddress).toHaveBeenCalledWith(
         '0xReusableReceiverWallet',
         undefined
       );
       expect(hdWallet.deriveNextAddress).not.toHaveBeenCalled();
-      expect(participantServiceMock.saveReceiverChainWallet).not.toHaveBeenCalled();
+      expect(sessionOwnerServiceMock.saveSessionOwnerChainWallet).not.toHaveBeenCalled();
       expect(mockRepo.create).toHaveBeenCalledWith(expect.objectContaining({
         depositAddress: '0xReusableReceiverWallet',
         derivationIndex: 8,
         hdChain: 'ethereum',
+        sessionOwnerId: 7,
       }));
     });
 
-    it('should derive and save a receiver chain wallet when none exists', async () => {
+    it('should derive and save a session owner chain wallet when none exists', async () => {
       const hdWallet = enableHDWallet();
 
-      await manager.createSession({ ...validInput, receiverId: 42 });
+      await manager.createSession({ ...validInput, receiverId: 42, sessionOwnerId: 7 });
 
       expect(hdWallet.deriveNextAddress).toHaveBeenCalledWith('bep20');
-      expect(participantServiceMock.saveReceiverChainWallet).toHaveBeenCalledWith(
-        42,
+      expect(sessionOwnerServiceMock.saveSessionOwnerChainWallet).toHaveBeenCalledWith(
+        7,
         'bep20',
         {
           address: '0xDerivedReceiverWallet',
@@ -325,12 +326,13 @@ describe('SessionManager', () => {
         depositAddress: '0xDerivedReceiverWallet',
         derivationIndex: 12,
         hdChain: 'ethereum',
+        sessionOwnerId: 7,
       }));
     });
 
-    it('should reject a reused receiver wallet assigned to another active session', async () => {
+    it('should reject a reused session owner wallet assigned to another active session', async () => {
       enableHDWallet();
-      participantServiceMock.getReceiverChainWallet.mockResolvedValue({
+      sessionOwnerServiceMock.getSessionOwnerChainWallet.mockResolvedValue({
         address: '0xReusableReceiverWallet',
         derivationIndex: 8,
         hdChain: 'ethereum',
@@ -340,7 +342,7 @@ describe('SessionManager', () => {
         depositAddress: '0xReusableReceiverWallet',
       }));
 
-      await expect(manager.createSession({ ...validInput, receiverId: 42 }))
+      await expect(manager.createSession({ ...validInput, receiverId: 42, sessionOwnerId: 7 }))
         .rejects.toThrow(ReceiverWalletInUseError);
       expect(mockRepo.create).not.toHaveBeenCalled();
     });
@@ -686,7 +688,7 @@ describe('SessionManager', () => {
   // ===========================================================================
 
   describe('fulfillRequest', () => {
-    it('should reuse an existing receiver chain wallet when fulfilling a request', async () => {
+    it('should reuse an existing session owner chain wallet when fulfilling a request', async () => {
       const hdWallet = enableHDWallet();
       const requestSession = createMockSession({
         id: 'pay_request',
@@ -703,15 +705,15 @@ describe('SessionManager', () => {
         receiverId: 42,
       });
       mockRepo._addSession(requestSession);
-      participantServiceMock.getReceiverChainWallet.mockResolvedValue({
+      sessionOwnerServiceMock.getSessionOwnerChainWallet.mockResolvedValue({
         address: '0xReusableReceiverWallet',
         derivationIndex: 8,
         hdChain: 'ethereum',
       });
 
-      const updated = await manager.fulfillRequest(requestSession.id, 'USDT', 'bep20');
+      const updated = await manager.fulfillRequest(requestSession.id, 'USDT', 'bep20', 7);
 
-      expect(participantServiceMock.getReceiverChainWallet).toHaveBeenCalledWith(42, 'bep20');
+      expect(sessionOwnerServiceMock.getSessionOwnerChainWallet).toHaveBeenCalledWith(7, 'bep20');
       expect(mockRepo.findActiveByDepositAddress).toHaveBeenCalledWith(
         '0xReusableReceiverWallet',
         requestSession.id
@@ -721,9 +723,10 @@ describe('SessionManager', () => {
       expect(updated.derivationIndex).toBe(8);
       expect(updated.hdChain).toBe('ethereum');
       expect(updated.status).toBe('pending');
+      expect(updated.sessionOwnerId).toBe(7);
     });
 
-    it('should derive and save a receiver chain wallet when fulfilling without one', async () => {
+    it('should derive and save a session owner chain wallet when fulfilling without one', async () => {
       const hdWallet = enableHDWallet();
       const requestSession = createMockSession({
         id: 'pay_request',
@@ -740,11 +743,11 @@ describe('SessionManager', () => {
       });
       mockRepo._addSession(requestSession);
 
-      const updated = await manager.fulfillRequest(requestSession.id, 'USDT', 'bep20');
+      const updated = await manager.fulfillRequest(requestSession.id, 'USDT', 'bep20', 7);
 
       expect(hdWallet.deriveNextAddress).toHaveBeenCalledWith('bep20');
-      expect(participantServiceMock.saveReceiverChainWallet).toHaveBeenCalledWith(
-        42,
+      expect(sessionOwnerServiceMock.saveSessionOwnerChainWallet).toHaveBeenCalledWith(
+        7,
         'bep20',
         {
           address: '0xDerivedReceiverWallet',
@@ -754,9 +757,10 @@ describe('SessionManager', () => {
       );
       expect(updated.depositAddress).toBe('0xDerivedReceiverWallet');
       expect(updated.derivationIndex).toBe(12);
+      expect(updated.sessionOwnerId).toBe(7);
     });
 
-    it('should reject request fulfillment when the reused receiver wallet has an active session', async () => {
+    it('should reject request fulfillment when the reused session owner wallet has an active session', async () => {
       enableHDWallet();
       const requestSession = createMockSession({
         id: 'pay_request',
@@ -772,7 +776,7 @@ describe('SessionManager', () => {
         receiverId: 42,
       });
       mockRepo._addSession(requestSession);
-      participantServiceMock.getReceiverChainWallet.mockResolvedValue({
+      sessionOwnerServiceMock.getSessionOwnerChainWallet.mockResolvedValue({
         address: '0xReusableReceiverWallet',
         derivationIndex: 8,
         hdChain: 'ethereum',
@@ -782,7 +786,7 @@ describe('SessionManager', () => {
         depositAddress: '0xReusableReceiverWallet',
       }));
 
-      await expect(manager.fulfillRequest(requestSession.id, 'USDT', 'bep20'))
+      await expect(manager.fulfillRequest(requestSession.id, 'USDT', 'bep20', 7))
         .rejects.toThrow(ReceiverWalletInUseError);
       expect(mockRepo.update).not.toHaveBeenCalled();
     });

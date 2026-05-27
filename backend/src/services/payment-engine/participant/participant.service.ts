@@ -6,7 +6,7 @@
  * before being written to the database.
  */
 
-import { HDChain, Network, PayerInput, ReceiverInput } from '../types';
+import { PayerInput, ReceiverInput } from '../types';
 import { bankService, ResolvedAccount } from '../../bank/bank.service';
 
 // =============================================================================
@@ -26,47 +26,6 @@ export interface ReceiverRecord {
   accountName: string;
   phone?: string;
   walletAddress?: string;
-}
-
-export interface ReceiverChainWallet {
-  address: string;
-  derivationIndex: number;
-  hdChain: HDChain;
-}
-
-type ReceiverWalletColumnSet = {
-  hdChain: HDChain;
-  addressColumn: string;
-  derivationIndexColumn: string;
-};
-
-function getReceiverWalletColumns(network: Network): ReceiverWalletColumnSet {
-  switch (network) {
-    case 'bitcoin':
-      return {
-        hdChain: 'bitcoin',
-        addressColumn: 'bitcoin_wallet_address',
-        derivationIndexColumn: 'bitcoin_derivation_index',
-      };
-    case 'tron':
-    case 'trc20':
-      return {
-        hdChain: 'tron',
-        addressColumn: 'tron_wallet_address',
-        derivationIndexColumn: 'tron_derivation_index',
-      };
-    case 'ethereum':
-    case 'erc20':
-    case 'bsc':
-    case 'bep20':
-    case 'polygon':
-    case 'base':
-      return {
-        hdChain: 'ethereum',
-        addressColumn: 'ethereum_wallet_address',
-        derivationIndexColumn: 'ethereum_derivation_index',
-      };
-  }
 }
 
 // =============================================================================
@@ -203,50 +162,6 @@ export class ParticipantService {
     }
 
     return Number(rows[0].id);
-  }
-
-  async getReceiverChainWallet(
-    receiverId: number,
-    network: Network
-  ): Promise<ReceiverChainWallet | null> {
-    const pool = (await import('../../../lib/mysql')).default;
-    const columns = getReceiverWalletColumns(network);
-
-    const [rows] = await pool.query(
-      `SELECT ${columns.addressColumn} AS address,
-              ${columns.derivationIndexColumn} AS derivation_index
-       FROM receivers
-       WHERE id = ?
-       LIMIT 1`,
-      [receiverId]
-    ) as [any[], any];
-
-    if (!rows || rows.length === 0 || !rows[0].address || rows[0].derivation_index == null) {
-      return null;
-    }
-
-    return {
-      address: rows[0].address,
-      derivationIndex: Number(rows[0].derivation_index),
-      hdChain: columns.hdChain,
-    };
-  }
-
-  async saveReceiverChainWallet(
-    receiverId: number,
-    network: Network,
-    wallet: ReceiverChainWallet
-  ): Promise<void> {
-    const pool = (await import('../../../lib/mysql')).default;
-    const columns = getReceiverWalletColumns(network);
-
-    await pool.query(
-      `UPDATE receivers
-       SET ${columns.addressColumn} = ?,
-           ${columns.derivationIndexColumn} = ?
-       WHERE id = ?`,
-      [wallet.address, wallet.derivationIndex, receiverId]
-    );
   }
 
   /**

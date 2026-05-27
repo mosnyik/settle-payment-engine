@@ -35,6 +35,7 @@ export interface CreateSessionData {
   parentWallet?: string;
   payerId?: number;
   receiverId?: number;
+  sessionOwnerId?: number;
   merchantId?: string;
   apiKeyId?: number;
   expiresAt: Date;
@@ -95,6 +96,7 @@ function rowToSession(row: any): PaymentSession {
     parentWallet: row.parent_wallet || undefined,
     payerId: row.payer_id ? Number(row.payer_id) : undefined,
     receiverId: row.receiver_id ? Number(row.receiver_id) : undefined,
+    sessionOwnerId: row.session_owner_id ? Number(row.session_owner_id) : undefined,
     merchantId: row.merchant_id || undefined,
     apiKeyId: row.api_key_id ? Number(row.api_key_id) : undefined,
     txHash: row.tx_hash || undefined,
@@ -124,10 +126,10 @@ export class SessionRepository {
           rate, asset_price, charge_amount, charge_from,
           deposit_address, wallet_id, derivation_index, hd_chain,
           funding_wallet_index, parent_wallet,
-          payer_id, receiver_id, merchant_id, api_key_id, is_sandbox,
+          payer_id, receiver_id, session_owner_id, merchant_id, api_key_id, is_sandbox,
           expires_at, created_at, updated_at,
           metadata, bank_ref
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.id,
           data.reference,
@@ -151,6 +153,7 @@ export class SessionRepository {
           data.parentWallet ?? null,
           data.payerId || null,
           data.receiverId || null,
+          data.sessionOwnerId || null,
           data.merchantId || null,
           data.apiKeyId || null,
           data.isSandbox ? 1 : 0,

@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import { paymentEngine } from '../services/payment-engine';
 import { participantService } from '../services/payment-engine/participant';
+import { getSessionOwnerScope, sessionOwnerService } from '../services/payment-engine/session-owner';
 import { legacySyncService } from '../services/payment-engine/sync';
 import {
   createPaymentSchema,
@@ -71,6 +72,7 @@ router.post(
     // Sandbox keys skip real NUBAN verification — use placeholder values.
     let resolvedReceiver: { bankCode: string; accountNumber: string; accountName: string; bankName: string } | undefined;
     let receiverId: number | undefined;
+    let sessionOwnerId: number | undefined;
     if (input.receiver) {
       if (apiKey?.isSandbox) {
         resolvedReceiver = {
@@ -96,6 +98,15 @@ router.post(
       });
     }
 
+    if (input.payer?.chatId) {
+      sessionOwnerId = await sessionOwnerService.getOrCreateSessionOwner({
+        ownerScope: getSessionOwnerScope(apiKey?.id),
+        ownerRef: input.payer.chatId,
+        phone: input.payer.phone,
+        walletAddress: input.payer.walletAddress,
+      });
+    }
+
     // Create payment session via PaymentEngine
     const session = await paymentEngine.createPayment({
       type: input.type,
@@ -118,6 +129,7 @@ router.post(
         walletAddress: input.receiver?.walletAddress,
       } : undefined,
       receiverId,
+      sessionOwnerId,
       merchantId: input.merchantId,
       merchantReference: input.merchantReference,
       callbackUrl: input.callbackUrl,

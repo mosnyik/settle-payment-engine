@@ -49,7 +49,7 @@ const createApiKeySchema = z.object({
   rateLimitTier: z.enum(['standard', 'premium', 'unlimited']).optional(),
   ipWhitelist: z.array(z.string()).optional(),
   expiresAt: z.string().datetime().optional().transform(val => val ? new Date(val) : undefined),
-  settlementMode: z.enum(['mongoro', 'paystack', 'self']).optional(),
+  settlementMode: z.enum(['mongoro', 'self']).optional(),
   confirmationThresholds: confirmationThresholdsSchema,
   isSandbox: z.boolean().optional(),
 });
@@ -61,7 +61,7 @@ const updateApiKeySchema = z.object({
   ipWhitelist: z.array(z.string()).nullable().optional(),
   webhookUrl: z.string().url().nullable().optional(),
   sweepAddress: z.string().nullable().optional(),
-  settlementMode: z.enum(['mongoro', 'paystack', 'self']).optional(),
+  settlementMode: z.enum(['mongoro', 'self']).optional(),
   confirmationThresholds: confirmationThresholdsSchema,
 });
 
@@ -152,7 +152,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           isActive: Boolean(row.is_active), expiresAt: row.expires_at,
           createdAt: row.created_at, lastUsedAt: row.last_used_at,
           webhookUrl: row.webhook_url, sweepAddress: row.sweep_address,
-          settlementMode: row.settlement_mode ?? 'paystack',
+          settlementMode: row.settlement_mode ?? 'mongoro',
           fundingWalletIndex: row.funding_wallet_index ?? null,
           fundingWalletBitcoin: row.funding_wallet_bitcoin ?? null,
           fundingWalletEthereum: row.funding_wallet_ethereum ?? null,

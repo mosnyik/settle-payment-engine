@@ -541,7 +541,7 @@ The response includes `publicKey` (`pk_test_...`) and `secretKey` (`sk_test_...`
 |-----------|---------|------|
 | Key prefix | `pk_test_` / `sk_test_` | `pk_live_` / `sk_live_` |
 | Deposit watcher | Skipped | Active |
-| Settlement | Short-circuits to `settled` instantly | Paystack / Mongoro / self |
+| Settlement | Short-circuits to `settled` instantly | Mongoro / self |
 | NUBAN lookup | Returns placeholder `Sandbox Account` | Real NUBAN API call |
 | `/v1/sandbox/*` endpoints | Enabled | 403 Forbidden |
 | `autoSettle: true` | Simulates full lifecycle (pending → settled) | Records directly as `settled` |
@@ -656,7 +656,7 @@ A summary row with totals (fiat volume, charges, net fiat, USD volume) is append
 - **Tiered Fees** - Configurable fee tiers based on transaction amount
 - **Multi-Chain** - Support for BTC, ETH, BNB, TRX, USDT and USDC (ERC20/BEP20/TRC20)
 - **State Machine** - Valid status transitions enforced per transaction type
-- **Multi-Provider Settlement** - Paystack (default), Mongoro, or self-settlement
+- **Multi-Provider Settlement** - Mongoro or self-settlement
 - **Manual Record Import** - `autoSettle: true` inserts live transfers directly as `settled` for external bookkeeping
 - **Reconciliation Reports** - End-of-day CSV/JSON exports for banks and merchants
 - **WaaS** - Wallet-as-a-Service: provision monitored deposit addresses for external platforms

@@ -71,7 +71,7 @@ Once decided, implementation involves:
 
 - `POST /v1/auth/register` — merchant name, email, password, business info
 - Email verification step (or skip for MVP and return credentials immediately)
-- On verify: auto-provision API key with `standard` tier and `paystack` settlement mode
+- On verify: auto-provision API key with `standard` tier and `mongoro` settlement mode
 - `POST /v1/auth/login` — returns JWT or session for merchant dashboard access
 - Merchant dashboard: view own payments, download reports, manage webhooks
 

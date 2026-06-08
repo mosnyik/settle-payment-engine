@@ -51,22 +51,4 @@ describe('TelegramService', () => {
     expect(message).toContain('Bank said &lt;reversed&gt; &amp; refunded');
   });
 
-  it('sends escaped insufficient balance messages', async () => {
-    const sendMessage = vi
-      .spyOn(service, 'sendMessage')
-      .mockResolvedValueOnce(true);
-
-    await service.sendPaystackInsufficientBalanceAlert(
-      session,
-      receiver,
-      'transfer<&>1'
-    );
-
-    expect(sendMessage).toHaveBeenCalledOnce();
-    const message = sendMessage.mock.calls[0][0];
-    expect(message).toContain('sess&lt;&amp;&gt;1');
-    expect(message).toContain('Access &amp; Diamond &lt;Bank&gt;');
-    expect(message).toContain('transfer&lt;&amp;&gt;1');
-    expect(message).not.toContain('transfer<&>1');
-  });
 });

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the architecture for exposing 2Settle's crypto-to-fiat payment engine as a **merchant payment gateway** — enabling businesses to accept crypto payments on their platforms the same way they integrate Paystack or Flutterwave.
+This document describes the architecture for exposing 2Settle's crypto-to-fiat payment engine as a **merchant payment gateway** — enabling businesses to accept crypto payments on their platforms the same way they integrate any payment gateway.
 
 ### Goals
 
@@ -249,7 +249,7 @@ Merchants can configure **multiple settlement accounts**:
 
 ### API Key Format
 
-Following the Paystack convention:
+API key format:
 - **Public key**: `pk_live_` + 32 random chars (used client-side, in JS SDK)
 - **Secret key**: `sk_live_` + 40 random chars (used server-side, never exposed)
 - **Test keys**: `pk_test_` / `sk_test_` for sandbox environment
@@ -1039,10 +1039,6 @@ MONGORO_TOKEN=your_token
 MONGORO_TRANSFERPIN=your_pin
 MONGORO_CALLBACK_URL=https://yourapp.com/v1/webhooks/mongoro
 
-# Paystack Settlement
-PAYSTACK_SECRET_KEY=sk_live_xxx
-PAYSTACK_WEBHOOK_SECRET=your_paystack_webhook_secret
-
 # Telegram Alerts
 TELEGRAM_ALERTS_ENABLED=true
 TELEGRAM_BOT_TOKEN=your_bot_token
@@ -1057,12 +1053,6 @@ POST /v1/webhooks/mongoro
 ```
 
 Receives status updates from Mongoro after transfer completion or failure. Configure this URL as the Mongoro callback URL. If `MONGORO_WEBHOOK_IPS` is configured, the endpoint accepts requests only from those IPs.
-
-```
-POST /v1/webhooks/paystack
-```
-
-Receives Paystack transfer events: `transfer.success`, `transfer.failed`, and `transfer.reversed`. Configure this URL in the Paystack dashboard. The endpoint verifies Paystack's `x-paystack-signature` header using `PAYSTACK_WEBHOOK_SECRET`.
 
 ```
 POST /v1/webhooks/telegram

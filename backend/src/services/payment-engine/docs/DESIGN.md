@@ -4,7 +4,7 @@
 
 ## Overview
 
-This document describes the architecture for exposing 2Settle's crypto-to-fiat payment engine as a **merchant payment gateway** — enabling businesses to accept crypto payments on their platforms the same way they integrate Paystack or Flutterwave.
+This document describes the architecture for exposing 2Settle's crypto-to-fiat payment engine as a **merchant payment gateway** — enabling businesses to accept crypto payments on their platforms the same way they integrate any payment gateway.
 
 ### Goals
 
@@ -239,7 +239,7 @@ CREATE TABLE merchant_settlement_accounts (
 
 ### API Key Format
 
-Following the Paystack convention:
+API key format:
 - **Public key**: `pk_live_` + 32 random chars (used client-side, in JS SDK)
 - **Secret key**: `sk_live_` + 40 random chars (used server-side, never exposed)
 - **Test keys**: `pk_test_` / `sk_test_` for sandbox environment

@@ -31,7 +31,7 @@ interface ApiKeyRow extends RowDataPacket {
   webhook_url: string | null;
   webhook_secret: string | null;
   sweep_address: string | null;
-  settlement_mode: 'mongoro' | 'paystack' | 'self';
+  settlement_mode: 'mongoro' | 'self';
   // Per-key merchant wallets
   funding_wallet_index: number | null;
   funding_wallet_bitcoin: string | null;
@@ -80,7 +80,7 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
     webhookUrl: row.webhook_url,
     webhookSecret: row.webhook_secret,
     sweepAddress: row.sweep_address,
-    settlementMode: row.settlement_mode ?? 'paystack',
+    settlementMode: row.settlement_mode ?? 'mongoro',
     fundingWalletIndex: row.funding_wallet_index ?? null,
     fundingWalletBitcoin: row.funding_wallet_bitcoin ?? null,
     fundingWalletEthereum: row.funding_wallet_ethereum ?? null,
@@ -167,7 +167,7 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWith
       input.webhookUrl || null,
       webhookSecret,
       input.sweepAddress || null,
-      input.settlementMode || 'paystack',
+      input.settlementMode || 'mongoro',
       input.confirmationThresholds ? JSON.stringify(input.confirmationThresholds) : null,
       fundingWalletIndex,
       fundingWalletBitcoin,
@@ -327,7 +327,7 @@ export async function updateApiKey(
     ipWhitelist?: string[] | null;
     webhookUrl?: string | null;
     sweepAddress?: string | null;
-    settlementMode?: 'mongoro' | 'paystack' | 'self';
+    settlementMode?: 'mongoro' | 'self';
     confirmationThresholds?: Partial<Record<string, number>> | null;
   }
 ): Promise<ApiKey | null> {

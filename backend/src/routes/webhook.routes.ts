@@ -1,16 +1,15 @@
 /**
  * Webhook Routes
  *
- * Handles inbound callbacks from settlement providers (Mongoro, Paystack).
+ * Handles inbound callbacks from settlement providers (Mongoro).
  * These are public endpoints — no HMAC auth, but each provider has its own
  * signature verification.
  */
 
 import { Router, Request, Response } from 'express';
 import { settlementService } from '../services/payment-engine/settlement/settlement.service';
-import { paystackService } from '../services/payment-engine/settlement/paystack.service';
 import { telegramService } from '../services/payment-engine/settlement/telegram.service';
-import { MongoroWebhookPayload, PaystackWebhookPayload } from '../services/payment-engine/settlement/types';
+import { MongoroWebhookPayload } from '../services/payment-engine/settlement/types';
 import { getClientIp, isIpAllowed } from '../security/middleware/ipWhitelist';
 import config from '../config';
 
@@ -44,35 +43,6 @@ router.post('/mongoro', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (error) {
     console.error('[Webhook] Mongoro error:', error);
-    return res.status(500).json({ success: false });
-  }
-});
-
-// =============================================================================
-// POST /v1/webhooks/paystack
-// =============================================================================
-router.post('/paystack', async (req: Request, res: Response) => {
-  // Verify signature
-  const signature = req.headers['x-paystack-signature'] as string;
-  const rawBody = JSON.stringify(req.body);
-
-  if (!paystackService.verifyWebhookSignature(rawBody, signature)) {
-    console.warn('[Webhook] Paystack signature verification failed');
-    return res.status(401).json({ success: false, message: 'Invalid signature' });
-  }
-
-  try {
-    const payload = req.body as PaystackWebhookPayload;
-
-    // Only handle transfer events
-    if (['transfer.success', 'transfer.failed', 'transfer.reversed'].includes(payload.event)) {
-      await settlementService.handlePaystackWebhook(payload);
-    }
-
-    // Paystack requires a 200 response quickly
-    return res.json({ success: true });
-  } catch (error) {
-    console.error('[Webhook] Paystack error:', error);
     return res.status(500).json({ success: false });
   }
 });

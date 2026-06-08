@@ -29,7 +29,7 @@ The Payment Engine enables crypto-to-fiat payments. Users pay in cryptocurrency,
 - **Flexible Fee Charging** - `chargeFrom: fiat` or `chargeFrom: crypto` per transfer
 - **Multi-Crypto Support** - BTC, ETH, BNB, TRX, USDT, USDC
 - **Automatic Monitoring** - Blockchain watchers detect and confirm deposits
-- **Instant Settlement** - Fiat payouts via Paystack (default), Mongoro, or self-settlement
+- **Instant Settlement** - Fiat payouts via Mongoro or self-settlement
 - **Per-Key Confirmation Thresholds** - Override required confirmations per chain
 - **Volume Analytics** - `transactionUsd` tracked on every session
 - **HD Wallet Technology** - Unique deposit address for each payment
@@ -1322,7 +1322,6 @@ Yes, with a 2% tolerance. Overpayments are processed normally. Significant under
 
 Settlement webhooks:
 - Mongoro callbacks: `POST /v1/webhooks/mongoro`
-- Paystack transfer events: `POST /v1/webhooks/paystack`
 - Telegram button callbacks: `POST /v1/webhooks/telegram`
 
 ### How long do payments take?

@@ -26,7 +26,7 @@ export interface ApiKey {
   webhookUrl: string | null;
   webhookSecret: string | null;
   sweepAddress: string | null;
-  settlementMode: 'mongoro' | 'paystack' | 'self';
+  settlementMode: 'mongoro' | 'self';
   // Per-key merchant wallets
   fundingWalletIndex: number | null;
   fundingWalletBitcoin: string | null;
@@ -51,7 +51,7 @@ export interface CreateApiKeyInput {
   // Wallet-as-a-Service fields
   webhookUrl?: string;
   sweepAddress?: string;
-  settlementMode?: 'mongoro' | 'paystack' | 'self';
+  settlementMode?: 'mongoro' | 'self';
   /** Per-chain confirmation threshold overrides, e.g. {"bitcoin":6,"tron":30} */
   confirmationThresholds?: Partial<Record<string, number>>;
   /** Create as sandbox/testnet key — skips real blockchain watching and real settlement */

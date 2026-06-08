@@ -111,11 +111,6 @@ export const config = {
         ? process.env.MONGORO_WEBHOOK_IPS.split(",").map((ip) => ip.trim())
         : [],
     },
-    paystack: {
-      secretKey: process.env.PAYSTACK_SECRET_KEY || "",
-      webhookSecret: process.env.PAYSTACK_WEBHOOK_SECRET || "",
-      lowBalanceThreshold: parseFloat(process.env.PAYSTACK_LOW_BALANCE_THRESHOLD || "100000"),
-    },
     telegram: {
       enabled: process.env.TELEGRAM_ALERTS_ENABLED === "true",
       botToken: process.env.TELEGRAM_BOT_TOKEN || "",

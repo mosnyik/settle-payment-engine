@@ -176,60 +176,6 @@ export class TelegramService {
   }
 
   /**
-   * Send alert when Paystack transfer fails due to insufficient balance.
-   * Session stays in 'settling' - admin must top up and manually confirm.
-   */
-  async sendPaystackInsufficientBalanceAlert(
-    session: SessionAlertData,
-    receiver: ReceiverAlertData,
-    transferReference: string
-  ): Promise<boolean> {
-    const bankDisplay = this.escapeHtml(receiver.bankName || receiver.bankCode);
-    const amount = session.fiatAmount.toLocaleString();
-    const fiatCurrency = this.escapeHtml(session.fiatCurrency);
-    const reference = this.escapeHtml(session.reference);
-    const accountNumber = this.escapeHtml(receiver.accountNumber);
-    const accountName = this.escapeHtml(receiver.accountName);
-    const escapedTransferReference = this.escapeHtml(transferReference);
-
-    const message = `
-<b>Paystack Insufficient Balance</b>
-
-Settlement could not complete - your Paystack balance is too low.
-
-<b>Session:</b> ${reference}
-<b>Amount:</b> ${fiatCurrency} ${amount}
-<b>Account:</b> ${accountNumber}
-<b>Bank:</b> ${bankDisplay}
-<b>Name:</b> ${accountName}
-<b>Transfer Ref:</b> ${escapedTransferReference}
-
-<b>Action:</b> Top up Paystack balance, then either retry the transfer or use the buttons below after manual payout.
-    `.trim();
-
-    return this.sendMessage(message, this.manualSettlementKeyboard(session.reference));
-  }
-
-  /**
-   * Send proactive low balance warning (before transfers fail).
-   */
-  async sendPaystackLowBalanceAlert(balance: number, currency: string = 'NGN'): Promise<boolean> {
-    const escapedCurrency = this.escapeHtml(currency);
-
-    const message = `
-<b>Paystack Low Balance Warning</b>
-
-Your Paystack balance is running low.
-
-<b>Current Balance:</b> ${escapedCurrency} ${balance.toLocaleString()}
-
-Top up your Paystack account to avoid failed settlements.
-    `.trim();
-
-    return this.sendMessage(message);
-  }
-
-  /**
    * Send alert for settlement reversal
    */
   async sendSettlementReversalAlert(

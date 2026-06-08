@@ -625,7 +625,7 @@ Session moves to `settled`.
 - **HD Wallet Derivation** - Unlimited unique deposit addresses from a single seed phrase
 - **Tiered Fees** - Configurable fee tiers based on transaction amount
 - **Multi-Chain** - Support for BTC, ETH, BNB, TRX, USDT, and USDC across multiple networks
-- **Multi-Provider Settlement** - Paystack (default), Mongoro, or self-settlement per API key
+- **Multi-Provider Settlement** - Mongoro or self-settlement per API key
 - **Per-Key Confirmation Thresholds** - Override required on-chain confirmations per chain per API key
 - **Volume Analytics** - `transactionUsd` persisted on every session for processing volume tracking
 - **State Machine** - Valid status transitions enforced per payment type

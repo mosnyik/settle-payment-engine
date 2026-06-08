@@ -6,11 +6,9 @@
  */
 
 import crypto from 'crypto';
-import axios from 'axios';
 import config from '../../../config';
 import { pool } from '../../../lib/mysql';
 import { MongoroService, mongoroService } from './mongoro.service';
-import { PaystackService, paystackService } from './paystack.service';
 import { TelegramService, telegramService, SessionAlertData } from './telegram.service';
 import { sendPaymentWebhook } from '../payment-webhook.service';
 import {
@@ -18,9 +16,7 @@ import {
   SettlementAttempt,
   CreateSettlementAttemptData,
   MongoroWebhookPayload,
-  PaystackWebhookPayload,
 } from './types';
-import { PaystackBankLike, findPaystackBankMatch } from './paystack-bank-matcher';
 import { getApiKeyById } from '../../../security/services/apiKey.service';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 
@@ -30,7 +26,6 @@ interface ReceiverRow extends RowDataPacket {
   account_number: string;
   account_name: string;
   bank_name?: string;
-  paystack_recipient_code: string | null;
 }
 
 interface ReceiverData {
@@ -38,7 +33,6 @@ interface ReceiverData {
   bankCode: string;
   accountName: string;
   bankName?: string;
-  paystackRecipientCode?: string;
 }
 
 interface SessionRow extends RowDataPacket {
@@ -58,21 +52,15 @@ interface SessionRow extends RowDataPacket {
 export class SettlementService {
   private readonly config: SettlementConfig;
   private readonly mongoro: MongoroService;
-  private readonly paystack: PaystackService;
   private readonly telegram: TelegramService;
-  private paystackBanksCache: { banks: PaystackBankLike[]; fetchedAt: number } | null = null;
-  private paystackBanksFetch: Promise<PaystackBankLike[]> | null = null;
-  private readonly paystackBanksCacheTtlMs = 24 * 60 * 60 * 1000;
 
   constructor(
     settlementConfig: SettlementConfig = config.settlement,
     mongoroSvc: MongoroService = mongoroService,
-    paystackSvc: PaystackService = paystackService,
     telegramSvc: TelegramService = telegramService
   ) {
     this.config = settlementConfig;
     this.mongoro = mongoroSvc;
-    this.paystack = paystackSvc;
     this.telegram = telegramSvc;
   }
 
@@ -167,101 +155,7 @@ export class SettlementService {
 
     const narration = `2Settle ${session.reference}`;
 
-    if (settlementMode === 'paystack') {
-      // 5a. Pre-flight balance check — don't attempt a transfer we know will fail
-      const balanceResult = await this.paystack.getBalance();
-      if (balanceResult.success && balanceResult.balance !== undefined) {
-        if (balanceResult.balance < payoutFiatAmount) {
-          await this.createSettlementAttempt({
-            sessionId,
-            provider: 'paystack',
-            status: 'failed',
-            amount: payoutFiatAmount,
-            accountNumber: receiver.accountNumber,
-            bankCode: receiver.bankCode,
-            accountName: receiver.accountName,
-            errorMessage: `Insufficient Paystack balance: ${balanceResult.balance}`,
-          });
-
-          // Balance won't cover this payment — alert and leave in settling for manual resolution
-          await this.telegram.sendPaystackInsufficientBalanceAlert(
-            { reference: session.reference, fiatAmount: payoutFiatAmount, fiatCurrency: session.fiat_currency },
-            receiver,
-            'pre-transfer-check'
-          );
-          console.error(`[Settlement][Paystack] Insufficient balance (${balanceResult.balance}) for ${session.reference} (${payoutFiatAmount}) — skipping transfer`);
-          return;
-        }
-      }
-
-      // 5b. Paystack mode — resolve the correct Paystack bank code (lazy fetch + cache)
-      let paystackBankCode: string;
-      try {
-        paystackBankCode = await this.resolvePaystackBankCode(receiver.bankCode, receiver.bankName);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await this.createSettlementAttempt({
-          sessionId,
-          provider: 'paystack',
-          status: 'failed',
-          amount: payoutFiatAmount,
-          accountNumber: receiver.accountNumber,
-          bankCode: receiver.bankCode,
-          accountName: receiver.accountName,
-          errorMessage: message,
-        });
-        await this.handleSettlementFailure(session, receiver, message);
-        return;
-      }
-
-      const attemptId = await this.createSettlementAttempt({
-        sessionId,
-        provider: 'paystack',
-        status: 'pending',
-        amount: payoutFiatAmount,
-        accountNumber: receiver.accountNumber,
-        bankCode: paystackBankCode,
-        accountName: receiver.accountName,
-      });
-
-      const response = await this.paystack.transfer(
-        receiver.accountNumber,
-        paystackBankCode,
-        receiver.accountName,
-        payoutFiatAmount,
-        narration,
-        session.fiat_currency,
-        receiver.paystackRecipientCode
-      );
-
-      if (response.success && response.data?.reference) {
-        // Cache recipient code on first successful transfer so future transfers skip createRecipient()
-        if (!receiver.paystackRecipientCode && response.data.recipientCode && session.receiver_id) {
-          await pool.execute(
-            `UPDATE receivers SET paystack_recipient_code = ? WHERE id = ?`,
-            [response.data.recipientCode, session.receiver_id]
-          );
-        }
-
-        await this.updateSettlementAttempt(attemptId, {
-          status: 'pending',
-          reference: response.data.reference,
-          responsePayload: response.data as unknown as Record<string, unknown>,
-        });
-        await this.updateSessionSettlement(sessionId, response.data.reference, 'paystack');
-        console.log(`[Settlement][Paystack] Initiated for ${session.reference}, ref: ${response.data.reference}`);
-      } else {
-        await this.updateSettlementAttempt(attemptId, {
-          status: 'failed',
-          errorMessage: response.message,
-          responsePayload: response as unknown as Record<string, unknown>,
-        });
-        await this.handleSettlementFailure(session, receiver, response.message);
-      }
-      return;
-    }
-
-    // 5b. Mongoro mode: create attempt record
+    // 5. Mongoro mode: create attempt record
     const attemptData: CreateSettlementAttemptData = {
       sessionId,
       provider: 'mongoro',
@@ -415,119 +309,6 @@ export class SettlementService {
   }
 
   /**
-   * Handle Paystack webhook callback
-   */
-  async handlePaystackWebhook(payload: PaystackWebhookPayload): Promise<void> {
-    const { event, data } = payload;
-    const reference = data?.reference;
-
-    if (!reference) {
-      console.error('[Settlement][Paystack] Webhook missing reference');
-      return;
-    }
-
-    const session = await this.getSessionBySettlementReference(reference);
-    if (!session) {
-      console.error(`[Settlement][Paystack] No session found for reference: ${reference}`);
-      return;
-    }
-
-    if (session.status !== 'settling') {
-      console.warn(`[Settlement][Paystack] Webhook for ${reference} but session status is ${session.status}`);
-      return;
-    }
-
-    const attempt = await this.getSettlementAttemptByReference(reference);
-
-    if (event === 'transfer.success') {
-      if (attempt) {
-        await this.updateSettlementAttempt(attempt.id, {
-          status: 'success',
-          responsePayload: payload as unknown as Record<string, unknown>,
-        });
-      }
-      await this.markSessionSettled(session.id);
-      sendPaymentWebhook(session.id, 'payment.settled').catch(() => {});
-      console.log(`[Settlement][Paystack] Completed for ${session.reference}`);
-      // Check balance after each successful transfer — catch low balance before the next one fails
-      this.checkPaystackBalance().catch(() => {});
-      return;
-    }
-
-    if (event === 'transfer.failed' || event === 'transfer.reversed') {
-      const isInsufficientBalance = this.paystack.isInsufficientBalanceError(
-        data.reason,
-        data.gateway_response
-      );
-
-      // Mark attempt as failed regardless
-      if (attempt) {
-        await this.updateSettlementAttempt(attempt.id, {
-          status: event === 'transfer.reversed' ? 'reversed' : 'failed',
-          errorMessage: data.reason,
-          responsePayload: payload as unknown as Record<string, unknown>,
-        });
-      }
-
-      if (isInsufficientBalance) {
-        // Keep session in 'settling' — do NOT mark as reversed.
-        // Admin tops up Paystack balance and uses /settle to confirm manually.
-        const sessionData = await this.getSession(session.id);
-        const receiver = await this.getReceiver(session.receiver_id);
-
-        if (sessionData && receiver) {
-          await this.telegram.sendPaystackInsufficientBalanceAlert(
-            {
-              reference: sessionData.reference,
-              fiatAmount: this.getPayoutFiatAmount(sessionData),
-              fiatCurrency: sessionData.fiat_currency,
-            },
-            receiver,
-            reference
-          );
-        }
-
-        console.error(`[Settlement][Paystack] Insufficient balance for ${session.reference} — staying in settling, awaiting manual resolution`);
-        return;
-      }
-
-      // Any other failure/reversal — mark as reversed and alert
-      await this.updateSessionStatus(session.id, 'settlement_reversed');
-      sendPaymentWebhook(session.id, 'payment.settlement_reversed').catch(() => {});
-
-      const sessionData = await this.getSession(session.id);
-      if (sessionData) {
-        await this.telegram.sendSettlementReversalAlert(
-          {
-            reference: sessionData.reference,
-            fiatAmount: this.getPayoutFiatAmount(sessionData),
-            fiatCurrency: sessionData.fiat_currency,
-          },
-          reference,
-          `Paystack: ${data.reason || event.replace('transfer.', '')}`
-        );
-      }
-
-      console.error(`[Settlement][Paystack] ${event} for ${session.reference}: ${data.reason ?? 'unknown reason'}`);
-    }
-  }
-
-  /**
-   * Check Paystack balance and send a low balance alert if below the configured threshold.
-   * Called after each successful transfer so the next one doesn't silently fail.
-   */
-  async checkPaystackBalance(): Promise<void> {
-    const threshold = this.config.paystack.lowBalanceThreshold;
-    const result = await this.paystack.getBalance();
-    if (!result.success || result.balance === undefined) return;
-
-    if (result.balance < threshold) {
-      await this.telegram.sendPaystackLowBalanceAlert(result.balance);
-      console.warn(`[Settlement][Paystack] Low balance alert: NGN ${result.balance.toLocaleString()} (threshold: NGN ${threshold.toLocaleString()})`);
-    }
-  }
-
-  /**
    * Handle Mongoro webhook callback
    */
   async handleWebhook(payload: MongoroWebhookPayload): Promise<void> {
@@ -624,13 +405,13 @@ export class SettlementService {
   // DATABASE HELPERS
   // =============================================================================
 
-  private async getSettlementMode(apiKeyId: number | null | undefined): Promise<'mongoro' | 'paystack' | 'self'> {
-    if (!apiKeyId) return 'paystack';
+  private async getSettlementMode(apiKeyId: number | null | undefined): Promise<'mongoro' | 'self'> {
+    if (!apiKeyId) return 'mongoro';
     try {
       const apiKey = await getApiKeyById(apiKeyId);
-      return apiKey?.settlementMode ?? 'paystack';
+      return apiKey?.settlementMode ?? 'mongoro';
     } catch {
-      return 'paystack';
+      return 'mongoro';
     }
   }
 
@@ -670,8 +451,7 @@ export class SettlementService {
     if (!receiverId) return null;
 
     const [rows] = await pool.execute<ReceiverRow[]>(
-      `SELECT id, bank_code, bank_account AS account_number, account_name, bank_name,
-              paystack_recipient_code
+      `SELECT id, bank_code, bank_account AS account_number, account_name, bank_name
        FROM receivers WHERE id = ?`,
       [receiverId]
     );
@@ -684,148 +464,7 @@ export class SettlementService {
       bankCode: row.bank_code,
       accountName: row.account_name,
       bankName: row.bank_name,
-      paystackRecipientCode: row.paystack_recipient_code ?? undefined,
     };
-  }
-
-  /**
-   * Resolve the correct Paystack bank code for a CBN bank code.
-   * Checks the banks table cache first; if missing, fetches from Paystack API and caches it.
-   */
-  private async resolvePaystackBankCode(cbnCode: string, bankName?: string): Promise<string> {
-    // 1. Check cache
-    const [cached] = await pool.execute<RowDataPacket[]>(
-      'SELECT paystack_code FROM banks WHERE code = ? AND paystack_code IS NOT NULL LIMIT 1',
-      [cbnCode]
-    );
-    if ((cached as any)[0]?.paystack_code) {
-      return (cached as any)[0].paystack_code;
-    }
-
-    // 2. Fetch from Paystack API
-    const secretKey = config.settlement.paystack.secretKey;
-    if (!secretKey) {
-      console.warn(`[Settlement] PAYSTACK_SECRET_KEY not set — using CBN code ${cbnCode} as fallback`);
-      return cbnCode;
-    }
-
-    try {
-      const banks = await this.fetchPaystackBanks(secretKey);
-
-      const paystackMatch = findPaystackBankMatch(cbnCode, bankName, banks);
-      if (paystackMatch) {
-        console.log(`[Settlement] Resolved ${cbnCode} "${bankName}" to Paystack code ${paystackMatch.bank.code} "${paystackMatch.bank.name}" via ${paystackMatch.reason}`);
-        await this.cachePaystackBankCode(cbnCode, paystackMatch.bank.code);
-        return paystackMatch.bank.code;
-      }
-
-      // Try exact code match first (some banks share CBN and Paystack codes)
-      const exact = banks.find(b => b.code === cbnCode);
-      if (exact) {
-        await this.cachePaystackBankCode(cbnCode, exact.code);
-        return exact.code;
-      }
-
-      // Fuzzy name match
-      if (bankName) {
-        const match = this.fuzzyFindBank(bankName, banks);
-        if (match) {
-          console.log(`[Settlement] Resolved ${cbnCode} "${bankName}" → Paystack code ${match.code} "${match.name}"`);
-          await this.cachePaystackBankCode(cbnCode, match.code);
-          return match.code;
-        }
-      }
-
-      console.warn(`[Settlement] Could not match CBN code ${cbnCode} ("${bankName}") to a Paystack bank — using CBN code as fallback`);
-    } catch (err: any) {
-      console.error(`[Settlement] Paystack bank list fetch failed for ${cbnCode}:`, err.message);
-      throw new Error(
-        `Could not resolve Paystack bank code for ${cbnCode} (${bankName || 'unknown bank'}): ${err.message}`
-      );
-    }
-
-    throw new Error(`Could not match bank ${cbnCode} (${bankName || 'unknown bank'}) to a Paystack bank code`);
-  }
-
-  private async cachePaystackBankCode(cbnCode: string, paystackCode: string): Promise<void> {
-    await pool.execute('UPDATE banks SET paystack_code = ? WHERE code = ?', [paystackCode, cbnCode]);
-    console.log(`[Settlement] Cached Paystack code for CBN ${cbnCode} → ${paystackCode}`);
-  }
-
-  private async fetchPaystackBanks(secretKey: string): Promise<PaystackBankLike[]> {
-    const now = Date.now();
-    if (
-      this.paystackBanksCache &&
-      now - this.paystackBanksCache.fetchedAt < this.paystackBanksCacheTtlMs
-    ) {
-      return this.paystackBanksCache.banks;
-    }
-
-    if (this.paystackBanksFetch) {
-      return this.paystackBanksFetch;
-    }
-
-    this.paystackBanksFetch = this.fetchPaystackBanksFromApi(secretKey)
-      .then((banks) => {
-        this.paystackBanksCache = { banks, fetchedAt: Date.now() };
-        return banks;
-      })
-      .finally(() => {
-        this.paystackBanksFetch = null;
-      });
-
-    return this.paystackBanksFetch;
-  }
-
-  private async fetchPaystackBanksFromApi(secretKey: string): Promise<PaystackBankLike[]> {
-    const banks: PaystackBankLike[] = [];
-    const perPage = 100;
-    let page = 1;
-    const timeout = parseInt(process.env.PAYSTACK_BANK_LIST_TIMEOUT_MS || '30000', 10);
-
-    while (true) {
-      const res = await axios.get<{ status: boolean; data: PaystackBankLike[] }>(
-        `https://api.paystack.co/bank?country=nigeria&perPage=${perPage}&page=${page}&include_nip_sort_code=true`,
-        { headers: { Authorization: `Bearer ${secretKey}` }, timeout }
-      );
-
-      const chunk = res.data?.data ?? [];
-      if (chunk.length === 0) break;
-
-      banks.push(...chunk);
-      if (chunk.length < perPage) break;
-
-      page++;
-    }
-
-    return banks;
-  }
-
-  private fuzzyFindBank(
-    name: string,
-    banks: Array<{ name: string; code: string }>
-  ): { name: string; code: string } | null {
-    const normalize = (s: string) =>
-      s.toLowerCase()
-       .replace(/\b(bank|microfinance|mfb|mfbank|finance|limited|ltd|plc|nigeria|nigerian)\b/g, '')
-       .replace(/[^a-z0-9 ]/g, '')
-       .replace(/\s+/g, ' ')
-       .trim();
-
-    const target = normalize(name);
-    let best: { name: string; code: string } | null = null;
-    let bestScore = 0.5; // minimum to accept
-
-    for (const b of banks) {
-      const wa = new Set(target.split(' ').filter(Boolean));
-      const wb = new Set(normalize(b.name).split(' ').filter(Boolean));
-      if (!wa.size || !wb.size) continue;
-      let matches = 0;
-      for (const w of wa) if (wb.has(w)) matches++;
-      const score = matches / Math.max(wa.size, wb.size);
-      if (score > bestScore) { bestScore = score; best = b; }
-    }
-    return best;
   }
 
   private async updateSessionStatus(sessionId: string, status: string): Promise<void> {

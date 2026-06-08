@@ -103,44 +103,9 @@ export interface MongoroConfig {
   webhookIps: string[];
 }
 
-export interface PaystackConfig {
-  secretKey: string;
-  webhookSecret: string;
-  lowBalanceThreshold: number;
-}
-
-export interface PaystackTransferResponse {
-  success: boolean;
-  message: string;
-  data?: {
-    reference: string;
-    transferCode?: string;
-    status: string;
-    amount: number;
-    recipientCode: string;
-  };
-}
-
-export interface PaystackWebhookPayload {
-  event: 'transfer.success' | 'transfer.failed' | 'transfer.reversed';
-  data: {
-    reference: string;
-    status: string;
-    amount: number;
-    reason?: string;
-    gateway_response?: string;
-    transfer_code?: string;
-    recipient?: {
-      account_number?: string;
-      name?: string;
-    };
-  };
-}
-
 export interface SettlementConfig {
   enabled: boolean;
   provider: 'mongoro';
   mongoro: MongoroConfig;
-  paystack: PaystackConfig;
   telegram: TelegramAlertConfig;
 }

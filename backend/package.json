@@ -13,6 +13,7 @@
     "start": "node dist/index.js",
     "sync:paystack-banks": "tsx scripts/sync-paystack-banks.ts",
     "update:gift-fields-by-amount": "node scripts/update-gift-fields-by-amount.js",
+    "update:rate": "tsx src/scripts/run-rate-update.ts",
     "lint": "eslint src --ext .ts",
     "test": "vitest",
     "test:run": "vitest run",

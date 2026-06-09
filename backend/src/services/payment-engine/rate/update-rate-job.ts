@@ -2,8 +2,11 @@ import axios from 'axios';
 import { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import pool from '../../../lib/mysql';
 
-const CRYPTOCOMPARE_USDT_NGN_URL =
-  'https://min-api.cryptocompare.com/data/price?fsym=USDT&tsyms=NGN';
+// const CRYPTOCOMPARE_USDT_NGN_URL =
+//   'https://min-api.cryptocompare.com/data/price?fsym=USDT&tsyms=NGN';
+
+const COINGECKO_USDT_NGN_URL =
+  'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=ngn';
 const REQUEST_TIMEOUT_MS = 10000;
 
 interface RateRow extends RowDataPacket {
@@ -11,8 +14,12 @@ interface RateRow extends RowDataPacket {
   profit_rate: string | number | null;
 }
 
-interface CryptoCompareResponse {
-  NGN?: number;
+// interface CryptoCompareResponse {
+//   NGN?: number;
+// }
+
+interface CoinGeckoResponse {
+  tether?: { ngn?: number };
 }
 
 export interface RateUpdateResult {
@@ -40,18 +47,28 @@ function parseRate(value: string | number | null, fieldName: string): number {
 }
 
 async function fetchLiveRate(): Promise<number> {
-  const response = await axios.get<CryptoCompareResponse>(CRYPTOCOMPARE_USDT_NGN_URL, {
+  // --- CoinGecko (free, no API key required) ---
+  const response = await axios.get<CoinGeckoResponse>(COINGECKO_USDT_NGN_URL, {
     timeout: REQUEST_TIMEOUT_MS,
   });
 
-  const liveRate = response.data?.NGN;
+  const liveRate = response.data?.tether?.ngn;
 
   if (typeof liveRate !== 'number' || !Number.isFinite(liveRate)) {
-
-      throw new Error('CryptoCompare response did not contain a valid NGN rate');
+    throw new Error('CoinGecko response did not contain a valid NGN rate');
   }
 
   return Number(liveRate.toFixed(2));
+
+  // --- CryptoCompare / CoinDesk (commented out — requires paid plan as of mid-2025) ---
+  // const response = await axios.get<CryptoCompareResponse>(CRYPTOCOMPARE_USDT_NGN_URL, {
+  //   timeout: REQUEST_TIMEOUT_MS,
+  // });
+  // const liveRate = response.data?.NGN;
+  // if (typeof liveRate !== 'number' || !Number.isFinite(liveRate)) {
+  //   throw new Error('CryptoCompare response did not contain a valid NGN rate');
+  // }
+  // return Number(liveRate.toFixed(2));
 }
 
 export async function updateRateJob(rateId: number = 1): Promise<RateUpdateResult> {

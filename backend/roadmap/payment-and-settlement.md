@@ -227,7 +227,7 @@ If Mongoro settlement fails:
 | Mongoro         | Automatic bank transfer  | **Code ready, not configured** (credentials commented out in `.env`) |
 | Manual/Telegram | Human-operated           | **Active**                  |
 | Self-Settlement | Integrator-controlled    | **Active**                  |
-| Paystack        | ~~Removed~~              | **Fully deleted** (commit history + migration `010_remove_paystack.sql`) |
+
 
 ### Settlement Tracking
 

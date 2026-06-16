@@ -30,21 +30,23 @@ Validated in `session-manager.ts` (`VALID_CRYPTO_NETWORKS`):
 | TRX   | Tron                                         |
 | USDT  | Ethereum (ERC20), BSC (BEP20), Tron (TRC20)  |
 
-> **Note:** USDC is defined as a `CryptoCurrency` type and has sweeper token contracts configured, but it is **NOT** included in `VALID_CRYPTO_NETWORKS`. USDC payments will be rejected at session creation. To enable USDC, it needs to be added to that map.
+
+> **Note:** USDC is defined as a `CryptoCurrency` type and has sweeper token contracts configured, but is not yet wired into the system to be collected as valid crypto payment. If a client sends USDC right now, it would be rejected. Pending whenwe enable it.
 
 ### Supported Fiat Currencies (Settlement Side)
 
 - **NGN** (Nigerian Naira) — **only currency with working rate support**
 
-> **Note:** GHS, KES, and ZAR are defined as `FiatCurrency` types, but the rate service throws `RateServiceUnavailableError` for any currency other than NGN. These are type-level placeholders — they do not work today.
+> **Note:** GHS, KES, and ZAR are defined as `FiatCurrency` types, but we do not have rate service for them yet, so if we try to make a transaction with any of them, we would get an error, untill they are activated
+
 
 ### Payment Types
 
 | Type                | Description                                                                                   |
 | ------------------- | --------------------------------------------------------------------------------------------- |
 | `transfer`          | Payer sends crypto, receiver gets fiat in their bank. Requires payer chat ID, receiver bank details, crypto type, and network. |
-| `gift`              | Payer sends crypto, receiver claims it later via `POST /payments/gifts/:ref/claim/confirm`.    |
-| `request`           | Receiver creates a payment request specifying fiat amount. Payer fulfills via `POST /payments/requests/:ref/fulfill`. |
+| `gift`              | Payer sends crypto, receiver claims it later.    |
+| `request`           | Receiver creates a payment request specifying fiat amount. Payer fulfills. |
 | `merchant`          | Merchant-initiated payment flow for commerce integrations.                                     |
 | `bank_confirmation` | Bank's internal reference tracking. Uses `bankRef` field for the bank's own transaction reference. |
 
@@ -53,10 +55,10 @@ Validated in `session-manager.ts` (`VALID_CRYPTO_NETWORKS`):
 #### Step 1: Payment Session Created
 
 - Client calls `POST /payments` with payment type, amounts, crypto/network, and payer/receiver details.
-- System verifies receiver bank account via NUBAN API (`bank.service.ts`). Sandbox API keys skip real NUBAN verification and use placeholder values.
+- System verifies receiver bank account via NUBAN API. Sandbox API keys skip real NUBAN verification and use placeholder values.
 - Exchange rate is locked for 30 minutes:
   - **Exchange rate:** Fetched from internal `rates` DB table, then a **1% adjustment (reduction)** is applied as platform spread.
-  - **Asset price:** Fetched from CoinMarketCap API, except USDT which is **hardcoded at $1**.
+  - **Asset price:** Fetched from CoinGecko API, except USDT which is **hardcoded at $1**.
   - Both values are cached for 60 seconds.
 - Fees are calculated based on fiat amount tier:
 
@@ -67,21 +69,20 @@ Validated in `session-manager.ts` (`VALID_CRYPTO_NETWORKS`):
 | ₦1,000,001 – ₦2,000,000  | ₦1,500 | premium    |
 
 - **Amount limits:** Min ₦1, Max ₦2,000,000.
-- Fee can be charged from crypto (payer pays more, default) or deducted from fiat (receiver gets less), controlled by the `chargeFrom` parameter.
-- **Crypto-first mode:** If `cryptoAmount` is provided instead of `fiatAmount`, the system reverse-calculates the fiat amount using `calculateChargesFromCrypto()`. Not valid for `request` type.
+- Fee can be charged from crypto (payer pays more, default) or deducted from fiat (receiver gets less).
+- **Crypto-first mode:** If `cryptoAmount` is provided instead of `fiatAmount`, the system reverse-calculates the fiat amount. Not valid for `request` type.
 
 #### Step 2: Deposit Wallet Assigned
 
 Two wallet assignment strategies:
 
 - **HD Wallet (preferred):** System derives a unique address per chain per session owner (payer). The same payer reuses the same address on subsequent payments on the same chain. Derivation uses BIP39 mnemonic with atomic index increments.
-- **Legacy Wallet Pool (fallback):** A pre-generated wallet is assigned from a pool and released after the session.
 
 The deposit address and exact crypto amount to send are returned to the client.
 
 #### Step 3: Blockchain Monitoring Begins
 
-Deposit watcher starts polling the blockchain. Sandbox sessions skip the real watcher — deposits are simulated via `POST /sandbox/payments/:ref/simulate-deposit`.
+Deposit watcher starts polling the blockchain. Sandbox sessions skip the real watcher.
 
 | Chain    | Adapter API              | Default Interval | Current .env Override |
 | -------- | ------------------------ | ---------------- | --------------------- |
@@ -106,8 +107,7 @@ Required on-chain confirmations:
 | Ethereum | 12                     |
 | BSC      | 15                     |
 | Tron     | 19                     |
-| Polygon  | 128                    |
-| Base     | 12                     |
+
 
 Session status moves to `confirmed`. Settlement process is triggered automatically.
 
@@ -166,7 +166,7 @@ Events fired at each state transition:
 - `payment.failed`
 - `payment.settlement_reversed`
 
-Authenticated via HMAC-SHA256 signature in `X-Webhook-Signature` header.
+Authenticated via HMAC-SHA256 signature in `X-Webhook-Signature` header for secure webhook communication to avoid transaction replay.
 
 ---
 
@@ -178,29 +178,28 @@ Once a crypto deposit is confirmed on-chain, the platform initiates a fiat bank 
 
 ### Settlement Modes
 
-The system supports two settlement modes on `master`, configured per API key. The mode is determined by `getSettlementMode()` (`settlement.service.ts:408-416`), which reads the API key's `settlementMode` field and **defaults to `'mongoro'`** if unset.
+The system supports two settlement modes, configured per API key. The mode is fetched from the API key's `settlementMode` field and **defaults to `'mongoro'`** if unset right now.
 
 #### Mode 1: Mongoro (Automatic — Default)
 
-`src/services/payment-engine/settlement/mongoro.service.ts`
 
 1. Session status updated to `settling`.
 2. Settlement attempt record created in `settlement_attempts` table.
-3. Direct API call to Mongoro transfer endpoint with receiver bank details, amount, and narration (`settlement.service.ts:172-180`).
+3. Direct API call to Mongoro transfer endpoint with receiver bank details, amount, and narration.
 4. If Mongoro returns success with a reference → session records the reference and waits for webhook.
-5. If Mongoro call fails → `handleSettlementFailure()` triggers Telegram alert.
+5. If Mongoro call fails → system triggers Telegram alert.
 6. Mongoro webhook (IP-whitelisted) confirms success, failure, or reversal.
 
-> **Current state:** Mongoro API URL, token, and transfer pin are **commented out** in `.env`. Mongoro is not configured for live use.
+> **Current state:** Mongoro is not configured for live use, so payments route to manual settlement by default.
 
 #### Mode 2: Self-Settlement (Integrator-Handled)
 
-1. System generates a one-time settlement token (32-byte hex, 24-hour expiry) (`settlement.service.ts:128-136`).
-2. Token stored in `payment_sessions.settlement_token`.
+1. System generates a one-time settlement token (32-byte hex, 24-hour expiry).
+2. Token stored in in the db as `settlement_token`.
 3. Token sent to integrator via `payment.settling` webhook.
 4. Integrator handles actual bank transfer using their own systems.
 5. Integrator confirms completion: `POST /payments/:reference/settle` with the token.
-6. Token is consumed (one-time use), verified via `crypto.timingSafeEqual()`.
+6. Token is consumed (one-time use), verified via by system.
 
 ### Fallback Mechanism
 
@@ -209,7 +208,7 @@ If Mongoro settlement fails:
 ```
 1. Mongoro API call fails
    ↓
-2. Telegram alert sent to operations team (telegram.service.ts)
+2. Telegram alert sent to admins team on telegram
    ↓
 3. Session stays in "settling" status (not marked failed immediately)
    ↓
@@ -224,7 +223,7 @@ If Mongoro settlement fails:
 
 | Provider        | Type                     | Status on `master`          |
 | --------------- | ------------------------ | --------------------------- |
-| Mongoro         | Automatic bank transfer  | **Code ready, not configured** (credentials commented out in `.env`) |
+| Mongoro         | Automatic bank transfer  | **Code ready, but not configured**  |
 | Manual/Telegram | Human-operated           | **Active**                  |
 | Self-Settlement | Integrator-controlled    | **Active**                  |
 
@@ -244,7 +243,7 @@ All settlement attempts are logged in the `settlement_attempts` table:
 | Provider   | Role                  | Status on `master`          |
 | ---------- | --------------------- | --------------------------- |
 | **Mongoro** | Sole automatic payout | Code ready, **not configured** |
-| **Paystack**| ~~Removed~~           | Deleted from codebase       |
+
 
 This means **there is currently no live automatic settlement provider configured.** Settlement will either fail (triggering Telegram fallback) or must use self-settlement mode.
 
@@ -260,7 +259,7 @@ This means **there is currently no live automatic settlement provider configured
 | **Bloc (getbloc.co)** | Banking-as-a-service. Offers direct bank transfers, virtual accounts, and card issuance. |
 | **Fincra** | Pan-African payment infrastructure. Supports NGN payouts, collections, and cross-border transfers. |
 | **Budpay** | Nigerian payment gateway with transfer/payout capabilities. API-first approach. |
-| **Paystack** | Could be re-integrated. Was previously in the codebase. Reliable, excellent API docs, widely used in Nigeria. Requires pre-funding. |
+
 
 #### B. Crypto-Specific Off-Ramp Providers
 

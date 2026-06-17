@@ -259,6 +259,7 @@ This means **there is currently no live automatic settlement provider configured
 | **Bloc (getbloc.co)** | Banking-as-a-service. Offers direct bank transfers, virtual accounts, and card issuance. |
 | **Fincra** | Pan-African payment infrastructure. Supports NGN payouts, collections, and cross-border transfers. |
 | **Budpay** | Nigerian payment gateway with transfer/payout capabilities. API-first approach. |
+| **Busha** | SEC-licensed Nigerian crypto infrastructure platform. API supports crypto-to-fiat conversion and direct NGN bank transfer payouts in one step. Also covers KES, GHS, UGX, TZS, XOF, RWF. |
 
 
 #### B. Crypto-Specific Off-Ramp Providers
@@ -300,6 +301,7 @@ This means **there is currently no live automatic settlement provider configured
 | Transak       | Full Off-Ramp    | 10-60min    | Medium       | Medium       | Good        | High       |
 | Binance OTC   | OTC Desk         | Varies      | High         | Very High    | N/A (manual)| High       |
 | Yellow Card   | Exchange         | 10-30min    | Medium       | Medium       | Basic       | Medium     |
+| Busha         | Crypto Off-Ramp + Bank Transfer | Fast   | Medium-High  | Medium       | Good        | Low        |
 
 ---
 
@@ -324,8 +326,7 @@ This flow is architecturally sound, but the current deployment has critical gaps
 **Problem:** There is currently **no configured settlement provider**. No automatic payouts can happen.
 
 **Solution (pick one or both):**
-- **Option A:** Configure Mongoro — uncomment and fill in `MONGORO_API_URL`, `MONGORO_TOKEN`, `MONGORO_TRANSFERPIN`, `MONGORO_CALLBACK_URL`, `MONGORO_WEBHOOK_IPS` in `.env`.
-- **Option B:** Re-integrate Paystack or integrate a new provider (Flutterwave, Korapay). The settlement service architecture (`settlement.service.ts`) is clean and modular — adding a new provider means creating a service file and adding a branch in `settleSession()`.
+Integrate a new provider (Flutterwave, Korapay). This time route the payment through a proxy infra
 
 ### 4.2. Multi-Provider Settlement with Failover
 
@@ -335,15 +336,15 @@ This flow is architecturally sound, but the current deployment has critical gaps
 
 ```
 Settlement Request
-  → Try Mongoro (primary)
+  → Try (primary provider)
     → If API error:
-      → Try Flutterwave/Paystack (secondary)
+      → Try (secondary provider)
         → If secondary fails:
           → Telegram alert for manual settlement
 ```
 
 This requires:
-- Modifying `settleSession()` to try a secondary provider on failure instead of going straight to `handleSettlementFailure()`
+- Modifying payout to try a secondary provider on failure instead of going straight to manual payout
 - Provider health checks
 - Configurable priority ordering per API key
 
@@ -354,7 +355,7 @@ This requires:
 **Solution:**
 - Set up balance monitoring with Telegram alerts at configurable thresholds.
 - Implement a cron job for periodic balance checks.
-- Dashboard showing real-time provider balance vs. pending settlements.
+- Start showing real-time provider balance vs. pending settlements on the admin dashboard.
 - Pre-fund based on projected daily settlement volume.
 
 ### 4.4. Optimize Stablecoin Focus
@@ -362,12 +363,23 @@ This requires:
 **Problem:** Volatile crypto (BTC, ETH) creates rate risk during the 30-minute session window. Also, USDC is defined but not routable.
 
 **Solution:**
-- **Enable USDC:** Add USDC to `VALID_CRYPTO_NETWORKS` in `session-manager.ts`. The sweeper already has USDC contract addresses configured.
 - Encourage USDT/USDC payments (minimal price volatility — USDT is already hardcoded at $1).
 - For volatile assets, consider shorter session TTLs or dynamic rate adjustments.
 - The 1% spread may not be sufficient for volatile assets — consider a per-asset buffer.
 
-### 4.5. Improve Sweep Reliability
+### 4.5. Reduce TRC20 Sweep Costs with Energy Rental
+
+**Problem:** Every TRC20 (USDT) sweep burns TRX for energy. The system pre-funds 10 TRX to each derived address (`prefundTronGas()`), which is permanently consumed. At scale, this adds up — 10 sweeps/day burns 50–100 TRX/day (~$15–$30) gone forever.
+
+**Solution:** Integrate a Tron energy rental service (e.g., TronSave, TronEnergy) before each TRC20 sweep:
+- Before sweeping, call the rental API to provision ~65,000 energy to the derived address.
+- The derived address can then execute the TRC20 `transfer()` without burning TRX for energy.
+- Cost is ~30–60% cheaper than burning TRX directly, with no upfront capital lock-up.
+- Replaces the current `prefundTronGas()` flow for Tron token sweeps.
+
+**Break-even:** Immediately cheaper than the current approach at any volume.
+
+### 4.6. Improve Sweep Reliability
 
 **Problem:** Failed sweeps can leave funds stranded in derived addresses.
 
@@ -377,7 +389,7 @@ This requires:
 - Build an admin dashboard for sweep status monitoring.
 - Consider batch sweeping during low-gas periods for EVM chains.
 
-### 4.6. Settlement SLA Tracking
+### 4.7. Settlement SLA Tracking
 
 **Problem:** No formal tracking of settlement timing.
 
@@ -386,7 +398,7 @@ This requires:
 - Alert on settlements taking longer than threshold (e.g., >15 minutes).
 - Track provider-specific performance.
 
-### 4.7. Redundant Blockchain Monitoring
+### 4.8. Redundant Blockchain Monitoring
 
 **Problem:** Single adapter per chain. If Etherscan is down, Ethereum deposits are missed.
 
@@ -394,7 +406,7 @@ This requires:
 - Add fallback RPC-based monitoring (query node directly).
 - Or add secondary explorer APIs (e.g., Blockscout for Ethereum, Tronscan for Tron).
 
-### 4.8. Immediate Configuration Action Items
+### 4.9. Immediate Configuration Action Items
 
 Before going live:
 
@@ -456,7 +468,28 @@ Instead of converting crypto to fiat, offer stablecoin payouts:
 - Useful for B2B payments, freelancer payments, cross-border transfers.
 - Lower fees, instant settlement.
 
-### 5.5. Smart Contract Escrow
+### 5.5. TRX Energy Staking for Zero-Cost TRC20 Sweeps
+
+**Current state:** TRC20 sweeps either burn TRX (current) or rent energy from third-party services (short-term fix). Both have per-transaction costs.
+
+**Long-term solution:** Stake a large TRX position on the hot wallet (or a dedicated staking address) and use `delegateResource()` to lend energy to derived addresses before each sweep:
+- Stake TRX once — the capital stays yours and can be unstaked anytime.
+- Before each TRC20 sweep, delegate energy from the staked address to the derived address.
+- The derived address executes the TRC20 `transfer()` with zero TRX burn — energy is "free."
+- Energy regenerates on the staked address over 24 hours.
+- Eliminates both the `prefundTronGas()` flow and third-party energy rental dependency.
+
+**Staking requirements (post-Proposal #104):**
+
+| Daily TRC20 sweeps | TRX to stake | Capital required (~$0.27/TRX) |
+|---------------------|-------------|-------------------------------|
+| 1/day | ~5,000–7,000 | ~$1,350–$1,890 |
+| 10/day | ~50,000–70,000 | ~$13,500–$18,900 |
+| 100/day | ~500,000–700,000 | ~$135,000–$189,000 |
+
+**Break-even vs energy rental:** At ~5+ sweeps/day, staking becomes cheaper than rental within a few weeks. The capital is not consumed — only locked.
+
+### 5.6. Smart Contract Escrow
 
 Replace centralized session management with smart contract escrow:
 - Payer deposits to escrow contract.
@@ -464,7 +497,7 @@ Replace centralized session management with smart contract escrow:
 - Automatic release or refund based on time locks.
 - Trustless, transparent, auditable.
 
-### 5.6. Provider Aggregator Model
+### 5.7. Provider Aggregator Model
 
 Build an aggregation layer across multiple off-ramp providers:
 - Route settlements to the cheapest/fastest provider dynamically.
@@ -472,7 +505,7 @@ Build an aggregation layer across multiple off-ramp providers:
 - A/B test new providers with small percentages of traffic.
 - Score providers on reliability, speed, and cost.
 
-### 5.7. Compliance & Licensing
+### 5.8. Compliance & Licensing
 
 For long-term viability in Nigeria:
 - Obtain relevant licenses (PSP, PSSP, or partner with licensed entity).
@@ -480,7 +513,7 @@ For long-term viability in Nigeria:
 - Transaction monitoring and suspicious activity reporting.
 - Work with regulators proactively — crypto regulation is evolving in Nigeria.
 
-### 5.8. Treasury Management System
+### 5.9. Treasury Management System
 
 Build a proper treasury management layer:
 - Real-time visibility into crypto holdings across all wallets (hot, cold, derived).
@@ -489,7 +522,7 @@ Build a proper treasury management layer:
 - Risk management: exposure limits per crypto asset, hedging for volatile assets.
 - Accounting integration: automated reconciliation of crypto in vs. fiat out.
 
-### 5.9. Event-Driven Architecture
+### 5.10. Event-Driven Architecture
 
 Migrate from polling-based blockchain monitoring to event-driven:
 - Use WebSocket subscriptions for real-time transaction detection.
@@ -497,7 +530,7 @@ Migrate from polling-based blockchain monitoring to event-driven:
 - Use message queues (Redis Streams, RabbitMQ) for reliable settlement processing.
 - Enables horizontal scaling and better fault tolerance.
 
-### 5.10. Redundancy and High Availability
+### 5.11. Redundancy and High Availability
 
 - Multi-region deployment for the payment engine.
 - Database replication with automatic failover.
@@ -515,5 +548,6 @@ Migrate from polling-based blockchain monitoring to event-driven:
 | Settlement | Mongoro only (**not configured**), manual fallback | Get Mongoro live OR add new provider, add failover | Direct bank integration, liquidity engine         |
 | Providers  | Mongoro (unconfigured), Paystack removed           | Configure Mongoro + add backup (Flutterwave/etc) | Aggregator model across 5+ providers              |
 | Rates      | CoinMarketCap + internal DB (NGN only, 1% spread) | Better volatility protection, enable multi-currency| Real-time market making, exchange integration     |
+| Sweep Costs| TRX burned per TRC20 sweep (10 TRX pre-fund)      | Energy rental to cut TRC20 sweep costs 30–60%     | TRX energy staking for zero-cost TRC20 sweeps     |
 | Operations | Telegram alerts, basic admin API                   | SLA tracking, sweep monitoring dashboard          | Full treasury management system                   |
 | Compliance | Basic                                              | Transaction limits, basic monitoring              | Full AML/KYC, licensing                           |

@@ -120,6 +120,15 @@ export interface SweeperConfig {
   };
   rpc: RPCEndpoints;
   thresholds: SweepThresholds;
+  /** Tron energy rental configuration (optional) */
+  energyRental?: {
+    enabled: boolean;
+    energyAmount: number;
+    durationSec: number;
+    tronsave: { apiKey: string; apiUrl: string };
+    tronzap: { apiKey: string; apiSecret: string; apiUrl: string };
+    tronenergyrent: { apiKey: string; apiUrl: string };
+  };
 }
 
 // =============================================================================

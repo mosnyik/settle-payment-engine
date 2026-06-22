@@ -159,6 +159,28 @@ export const config = {
       USDT: parseFloat(process.env.SWEEP_MIN_USDT || "1"),
       USDC: parseFloat(process.env.SWEEP_MIN_USDC || "1"),
     },
+    // Tron energy rental — rent energy instead of pre-funding TRX
+    energyRental: {
+      enabled: process.env.TRON_ENERGY_RENTAL_ENABLED === "true",
+      energyAmount: parseInt(process.env.TRON_ENERGY_AMOUNT || "65000", 10),
+      durationSec: parseInt(process.env.TRON_ENERGY_DURATION_SEC || "600", 10),
+      tronsave: {
+        apiKey: process.env.TRONSAVE_API_KEY || "",
+        apiUrl:
+          process.env.TRONSAVE_API_URL || "https://api.tronsave.io/v2",
+      },
+      tronzap: {
+        apiKey: process.env.TRONZAP_API_KEY || "",
+        apiSecret: process.env.TRONZAP_API_SECRET || "",
+        apiUrl: process.env.TRONZAP_API_URL || "https://api.tronzap.com/v1",
+      },
+      tronenergyrent: {
+        apiKey: process.env.TRONENERGYRENT_API_KEY || "",
+        apiUrl:
+          process.env.TRONENERGYRENT_API_URL ||
+          "https://api.tronenergyrent.com",
+      },
+    },
   },
 
   // Security configuration

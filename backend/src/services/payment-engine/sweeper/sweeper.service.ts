@@ -28,6 +28,7 @@ import {
   createBscTokenSweeper,
   createTronSweeper,
 } from './chains';
+import { getEnergyRentalService } from './energy-rental';
 
 // =============================================================================
 // ERROR CLASSES
@@ -520,8 +521,12 @@ export class SweeperService {
       await this.prefundEVMGas(request.fromAddress, fundingKey, rpcUrl, chainId);
 
     } else if (request.chain === 'tron') {
-      const fundingKey = hdWallet.getMerchantFundingPrivateKey('tron', request.fundingWalletIndex);
-      await this.prefundTronGas(request.fromAddress, fundingKey);
+      if (this.config.energyRental?.enabled) {
+        await this.rentTronEnergy(request.fromAddress);
+      } else {
+        const fundingKey = hdWallet.getMerchantFundingPrivateKey('tron', request.fundingWalletIndex);
+        await this.prefundTronGas(request.fromAddress, fundingKey);
+      }
     }
   }
 
@@ -607,6 +612,27 @@ export class SweeperService {
 
     // Allow a few seconds for the tx to be picked up before sweeping
     await new Promise(resolve => setTimeout(resolve, 4000));
+  }
+
+  /**
+   * Rent Tron energy for a child address instead of pre-funding TRX.
+   * Energy is delegated instantly by the rental provider.
+   */
+  private async rentTronEnergy(childAddress: string): Promise<void> {
+    const energyService = getEnergyRentalService();
+    const result = await energyService.rentEnergy(
+      childAddress,
+      this.config.energyRental?.energyAmount ?? 65_000,
+      this.config.energyRental?.durationSec ?? 600,
+    );
+
+    if (!result.success) {
+      throw new Error(`[Sweeper] Energy rental failed for ${childAddress}: ${result.error}`);
+    }
+
+    console.log(
+      `[Sweeper] Energy rented for ${childAddress} via ${result.provider} (order: ${result.orderId})`,
+    );
   }
 
   /**

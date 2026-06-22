@@ -6,6 +6,7 @@
  */
 
 import { ChainSweeper, ChainSweepParams, SweepResult, TOKEN_DECIMALS } from '../types';
+import { config } from '../../../../config';
 
 // TronWeb will be dynamically imported to avoid issues if not installed
 let TronWeb: any = null;
@@ -137,15 +138,19 @@ export class TronSweeper implements ChainSweeper {
       };
     }
 
-    // Check TRX balance for energy/bandwidth
-    const trxBalance = await tronWeb.trx.getBalance(params.fromAddress);
-    const minTrxRequired = 5 * SUN_PER_TRX; // 5 TRX for energy
+    // Check TRX balance for energy/bandwidth (skip when energy rental is active —
+    // the child has delegated energy and does not need to own TRX)
+    const energyRentalActive = !!config.sweeper.energyRental?.enabled;
+    if (!energyRentalActive) {
+      const trxBalance = await tronWeb.trx.getBalance(params.fromAddress);
+      const minTrxForGas = 5 * SUN_PER_TRX; // 5 TRX for energy
 
-    if (trxBalance < minTrxRequired) {
-      return {
-        success: false,
-        error: `Insufficient TRX for energy: need ${minTrxRequired / SUN_PER_TRX} TRX, have ${trxBalance / SUN_PER_TRX} TRX`,
-      };
+      if (trxBalance < minTrxForGas) {
+        return {
+          success: false,
+          error: `Insufficient TRX for energy: need ${minTrxForGas / SUN_PER_TRX} TRX, have ${trxBalance / SUN_PER_TRX} TRX`,
+        };
+      }
     }
 
     // Transfer tokens
@@ -158,7 +163,7 @@ export class TronSweeper implements ChainSweeper {
     return {
       success: true,
       txHash: tx,
-      gasUsed: minTrxRequired.toString(),
+      gasUsed: energyRentalActive ? '0' : (5 * SUN_PER_TRX).toString(),
     };
   }
 

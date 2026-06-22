@@ -367,17 +367,44 @@ This requires:
 - For volatile assets, consider shorter session TTLs or dynamic rate adjustments.
 - The 1% spread may not be sufficient for volatile assets — consider a per-asset buffer.
 
-### 4.5. Reduce TRC20 Sweep Costs with Energy Rental
+### 4.5. Reduce TRC20 Sweep Costs with Energy Rental ✅ IMPLEMENTED
 
 **Problem:** Every TRC20 (USDT) sweep burns TRX for energy. The system pre-funds 10 TRX to each derived address (`prefundTronGas()`), which is permanently consumed. At scale, this adds up — 10 sweeps/day burns 50–100 TRX/day (~$15–$30) gone forever.
 
-**Solution:** Integrate a Tron energy rental service (e.g., TronSave, TronEnergy) before each TRC20 sweep:
-- Before sweeping, call the rental API to provision ~65,000 energy to the derived address.
-- The derived address can then execute the TRC20 `transfer()` without burning TRX for energy.
-- Cost is ~30–60% cheaper than burning TRX directly, with no upfront capital lock-up.
-- Replaces the current `prefundTronGas()` flow for Tron token sweeps.
+**Solution (implemented):** Provider-agnostic energy rental service with 3 providers and automatic failover:
 
-**Break-even:** Immediately cheaper than the current approach at any volume.
+| Provider | API | Min Energy | Auth |
+|----------|-----|------------|------|
+| TronSave (priority 1) | `POST /v2/buy-resource` | None | `apikey` header |
+| TronZap (priority 2) | `POST /v1/transaction/new` | 50,000 | Bearer + SHA256 signature |
+| TronEnergyRent (priority 3) | `GET /place-energy-order` | 15,000 | `apiKey` query param |
+
+- Before sweeping, the service rents ~65,000 energy to the derived address via the first available provider.
+- If one provider fails, the next is tried automatically.
+- The derived address executes the TRC20 `transfer()` without burning TRX — energy is delegated.
+- Cost is ~$0.87–$1.50 per sweep (vs ~$2.10 with TRX pre-fund) — **50–60% savings**.
+- Legacy `prefundTronGas()` is preserved as fallback when `TRON_ENERGY_RENTAL_ENABLED=false`.
+
+**Configuration:**
+```env
+TRON_ENERGY_RENTAL_ENABLED=true
+TRON_ENERGY_AMOUNT=65000          # Energy units per sweep
+TRON_ENERGY_DURATION_SEC=600      # 10-minute rental window
+TRONSAVE_API_KEY=your_key         # At least one provider required
+TRONZAP_API_KEY=your_key
+TRONZAP_API_SECRET=your_secret
+TRONENERGYRENT_API_KEY=your_key
+```
+
+**Key files:**
+| File | Purpose |
+|------|---------|
+| `src/services/payment-engine/sweeper/energy-rental/types.ts` | Provider interface & config types |
+| `src/services/payment-engine/sweeper/energy-rental/providers/tronsave.provider.ts` | TronSave integration |
+| `src/services/payment-engine/sweeper/energy-rental/providers/tronzap.provider.ts` | TronZap integration |
+| `src/services/payment-engine/sweeper/energy-rental/providers/tronenergyrent.provider.ts` | TronEnergyRent integration |
+| `src/services/payment-engine/sweeper/energy-rental/energy-rental.service.ts` | Failover orchestrator |
+| `src/services/payment-engine/sweeper/energy-rental/index.ts` | Re-exports + singleton |
 
 ### 4.6. Improve Sweep Reliability
 
@@ -470,7 +497,7 @@ Instead of converting crypto to fiat, offer stablecoin payouts:
 
 ### 5.5. TRX Energy Staking for Zero-Cost TRC20 Sweeps
 
-**Current state:** TRC20 sweeps either burn TRX (current) or rent energy from third-party services (short-term fix). Both have per-transaction costs.
+**Current state:** TRC20 sweeps use energy rental from third-party providers (TronSave, TronZap, TronEnergyRent) via the `EnergyRentalService` implemented in section 4.5. This is 50–60% cheaper than burning TRX, but still has per-transaction costs (~$0.87–$1.50/sweep).
 
 **Long-term solution:** Stake a large TRX position on the hot wallet (or a dedicated staking address) and use `delegateResource()` to lend energy to derived addresses before each sweep:
 - Stake TRX once — the capital stays yours and can be unstaked anytime.
@@ -548,7 +575,7 @@ Migrate from polling-based blockchain monitoring to event-driven:
 | Settlement | Mongoro only (**not configured**), manual fallback | Get Mongoro live OR add new provider, add failover | Direct bank integration, liquidity engine         |
 | Providers  | Mongoro (unconfigured), Paystack removed           | Configure Mongoro + add backup (Flutterwave/etc) | Aggregator model across 5+ providers              |
 | Rates      | CoinMarketCap + internal DB (NGN only, 1% spread) | Better volatility protection, enable multi-currency| Real-time market making, exchange integration     |
-| Sweep Costs| TRX burned per TRC20 sweep (10 TRX pre-fund)      | Energy rental to cut TRC20 sweep costs 30–60%     | TRX energy staking for zero-cost TRC20 sweeps     |
+| Sweep Costs| ✅ Energy rental via 3 providers with failover     | Configure provider accounts, monitor costs         | TRX energy staking for zero-cost TRC20 sweeps     |
 | Operations | Telegram alerts, basic admin API                   | SLA tracking, sweep monitoring dashboard          | Full treasury management system                   |
 | Compliance | Basic                                              | Transaction limits, basic monitoring              | Full AML/KYC, licensing                           |
 | Reportly   | Integrated into payment engine                     | —                                                 | Dispute resolution workflow, automated refunds    |

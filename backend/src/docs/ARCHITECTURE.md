@@ -911,6 +911,23 @@ This document provides detailed diagrams of the payment engine's architecture an
 │  │                                                                      │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                     TRON ENERGY RENTAL (TRC20 Sweeps)               │    │
+│  │                                                                      │    │
+│  │   sweeper.ensureGasForTokenSweep()                                   │    │
+│  │     └─ rentTronEnergy() ──▶ EnergyRentalService.rentEnergy()        │    │
+│  │                               ├─ TronSave (priority 1)              │    │
+│  │                               ├─ TronZap (priority 2)               │    │
+│  │                               └─ TronEnergyRent (priority 3)        │    │
+│  │                                                                      │    │
+│  │   Features:                                                          │    │
+│  │   • Provider-agnostic interface with automatic failover              │    │
+│  │   • Rents energy to child address — no TRX pre-fund needed          │    │
+│  │   • 50–60% cheaper than burning TRX directly                        │    │
+│  │   • Falls back to legacy prefundTronGas() when disabled              │    │
+│  │                                                                      │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 

@@ -94,6 +94,10 @@ This document provides detailed diagrams of the payment engine's architecture an
 │  │   payment_   │  │   wallets    │  │    rates     │  │    payers    │  │  receivers   │  │
 │  │   sessions   │  │              │  │              │  │              │  │              │  │
 │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                                      │
+│  │   reports    │  │  audit_logs  │  │   api_keys   │                                      │
+│  │  (reportly)  │  │              │  │              │                                      │
+│  └──────────────┘  └──────────────┘  └──────────────┘                                      │
 │                                                                                              │
 └─────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -887,6 +891,23 @@ This document provides detailed diagrams of the payment engine's architecture an
 │  │   • Bulk payment processing                                          │    │
 │  │   • Custom settlement schedules                                      │    │
 │  │   • Dedicated support                                                │    │
+│  │                                                                      │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                     REPORTLY — COMPLAINT REPORTING                   │    │
+│  │                                                                      │    │
+│  │   Merchant ──▶ POST /v1/reports ──▶ ReportService.createReport()    │    │
+│  │   End User ──▶ GET /v1/reports/lookup?phone=... (public)            │    │
+│  │   End User ──▶ GET /v1/reports/:reportId        (public)            │    │
+│  │   Admin   ──▶ GET/PATCH /v1/admin/reports/complaints                │    │
+│  │                                                                      │    │
+│  │   Features:                                                          │    │
+│  │   • Merchants submit reports on behalf of users (HMAC auth)          │    │
+│  │   • Users look up their reports by phone or wallet (public)          │    │
+│  │   • Optional linkage to payment sessions (session_reference)         │    │
+│  │   • Admin management (status updates, confirmer, notes)              │    │
+│  │   • Notifications via Telegram + admin webhook                       │    │
 │  │                                                                      │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                              │

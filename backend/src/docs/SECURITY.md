@@ -35,6 +35,8 @@ These endpoints do not require authentication:
 - `GET /banks` - List of supported banks
 - `GET /banks/:code` - Bank details lookup
 - `GET /crypto/prices` - Cryptocurrency prices
+- `GET /reports/lookup` - Look up complaint reports by phone/wallet
+- `GET /reports/:reportId` - Get a single complaint report by ID
 
 ---
 
@@ -51,7 +53,7 @@ API keys are created by administrators. When created, you'll receive:
     "merchantId": "merchant_001",
     "name": "Production Key",
     "rateLimitTier": "standard",
-    "permissions": ["transfer.*", "gift.*", "request.*"]
+    "permissions": ["transfer.*", "gift.*", "request.*", "report:create"]
   },
   "secretKey": "sk_1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3"
 }

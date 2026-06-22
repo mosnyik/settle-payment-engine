@@ -15,6 +15,7 @@
 | Phase 9: Cashback | 🔲 Not Started | 0% |
 | Phase 10: Admin Dashboard | 🔲 Not Started | 0% |
 | Phase 11: Merchant Dashboard | 🔲 Not Started | 0% |
+| Phase 12: Reportly (Complaint Reporting) | ✅ Complete | 100% |
 
 **Last Updated**: 2026-02-18
 

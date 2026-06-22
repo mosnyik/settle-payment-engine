@@ -9,6 +9,7 @@
 3. [Alternative Providers for Crypto-to-Fiat (Nigeria)](#3-alternative-providers)
 4. [Short-Term Strategy](#4-short-term-strategy)
 5. [Long-Term Strategy](#5-long-term-strategy)
+6. [Reportly — Complaint & Fraud Reporting](#6-reportly--complaint--fraud-reporting)
 
 ---
 
@@ -550,3 +551,104 @@ Migrate from polling-based blockchain monitoring to event-driven:
 | Sweep Costs| TRX burned per TRC20 sweep (10 TRX pre-fund)      | Energy rental to cut TRC20 sweep costs 30–60%     | TRX energy staking for zero-cost TRC20 sweeps     |
 | Operations | Telegram alerts, basic admin API                   | SLA tracking, sweep monitoring dashboard          | Full treasury management system                   |
 | Compliance | Basic                                              | Transaction limits, basic monitoring              | Full AML/KYC, licensing                           |
+| Reportly   | Integrated into payment engine                     | —                                                 | Dispute resolution workflow, automated refunds    |
+
+---
+
+## 6. Reportly — Complaint & Fraud Reporting
+
+### Overview
+
+Reportly is a complaint and fraud reporting system integrated into the payment engine. It allows any API client (merchant) to submit fraud/complaint reports on behalf of their end users, and allows end users to publicly look up their report status by phone number or wallet address.
+
+### Architecture
+
+```
+MERCHANT (authenticated)                    END USER (public)
+         |                                        |
+    POST /v1/reports                    GET /v1/reports/lookup?phoneNumber=...
+    (HMAC auth + report:create)         GET /v1/reports/lookup?walletAddress=...
+         |                              GET /v1/reports/:reportId
+         v                                        |
+    ┌─────────────┐                               v
+    │ reports DB  │ <─────────────────────────────┘
+    └─────────────┘
+         |
+    Notification ──> Telegram + Admin Webhook
+         |
+    ADMIN (Bearer auth)
+    GET    /v1/admin/reports/complaints
+    GET    /v1/admin/reports/complaints/:reportId
+    PATCH  /v1/admin/reports/complaints/:reportId
+```
+
+### Report Types
+
+| Type | Description |
+|------|-------------|
+| `track_transaction` | User wants to trace a transaction |
+| `stolen_funds` | Funds disappeared or were stolen |
+| `fraud` | Fraudulent activity detected |
+
+### Report Status Lifecycle
+
+```
+pending → processing → resolved
+                    → dismissed
+```
+
+### API Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/v1/reports` | HMAC + `report:create` | Merchant submits report on behalf of user |
+| `GET` | `/v1/reports/lookup` | Public | User looks up reports by phone/wallet |
+| `GET` | `/v1/reports/:reportId` | Public | User checks a single report status |
+| `GET` | `/v1/admin/reports/complaints` | Bearer | Admin lists all reports (filtered) |
+| `GET` | `/v1/admin/reports/complaints/:reportId` | Bearer | Admin views report detail |
+| `PATCH` | `/v1/admin/reports/complaints/:reportId` | Bearer | Admin updates status/confirmer |
+
+### Create Report Request
+
+```json
+{
+  "complaintType": "fraud",
+  "name": "John Doe",
+  "phoneNumber": "+2348012345678",
+  "walletAddress": "0x1234...abcd",
+  "fraudsterWalletAddress": "0xdead...beef",
+  "sessionReference": "2S-ABC123",
+  "description": "Funds were sent but never arrived..."
+}
+```
+
+- `complaintType` and `name` are required
+- At least one of `phoneNumber` or `walletAddress` is required (used for user lookup)
+- `sessionReference` is optional — links the report to a payment session
+- `fraudsterWalletAddress` is optional
+
+### Notifications
+
+When a report is created, two notification channels fire in parallel:
+- **Telegram**: Formatted message to the admin chat (reuses existing Telegram service)
+- **Admin webhook**: HMAC-signed POST to `REPORTLY_ADMIN_WEBHOOK_URL` (if configured)
+
+### Database
+
+Reports are stored in the payment engine's own `reports` table with indexes on `phone_number` and `wallet_address` for fast public lookups, plus `api_key_id` and `merchant_id` for admin filtering.
+
+### Permissions
+
+- `report:create` — required to submit reports via `POST /v1/reports`
+- Public endpoints (`/lookup`, `/:reportId`) require no authentication
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/services/report/migrations/001_create_reports_table.sql` | Database migration |
+| `src/services/report/report.service.ts` | CRUD operations |
+| `src/services/report/report-notification.service.ts` | Telegram + webhook notifications |
+| `src/validation/report.schemas.ts` | Zod validation schemas |
+| `src/routes/report.routes.ts` | Client + public routes |
+| `src/routes/admin/reports.routes.ts` | Admin complaint management routes |

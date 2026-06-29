@@ -26,6 +26,9 @@ export const AMOUNT_LIMITS = {
   MAX: 2_000_000,
 } as const;
 
+// Extra percentage fee applied on first transaction 
+export const FIRST_TRANSACTION_FEE_RATE = 0.03;
+
 export const DEFAULT_FEE_TIERS: FeeTier[] = [
   {
     maxAmount: 100_000,
@@ -118,12 +121,12 @@ export function calculateCharges(
   crypto: CryptoCurrency,
   rateLock: RateLock,
   tiers: FeeTier[] = DEFAULT_FEE_TIERS,
-  chargeFrom: 'fiat' | 'crypto' = 'crypto'
+  chargeFrom: 'fiat' | 'crypto' = 'crypto',
+  percentageFeeRate: number = 0
 ): ChargeResult {
   const tier = getFeeTier(fiatAmount, tiers);
-  const fiatCharge = tier.feeAmount;
-  const cryptoCharge = fiatChargeToCrypto(fiatCharge, crypto, rateLock);
-  const chargeUsd = fiatCharge / rateLock.rate;
+  const flatFiatCharge = tier.feeAmount;
+  const flatCryptoCharge = fiatChargeToCrypto(flatFiatCharge, crypto, rateLock);
 
   let netCrypto: number;
   if (isStablecoin(crypto)) {
@@ -131,6 +134,15 @@ export function calculateCharges(
   } else {
     netCrypto = fiatAmount / rateLock.rate / rateLock.assetPrice;
   }
+
+  const extraCryptoFee = percentageFeeRate > 0 ? netCrypto * percentageFeeRate : 0;
+  const extraFiatFee = isStablecoin(crypto)
+    ? extraCryptoFee * rateLock.rate
+    : extraCryptoFee * (rateLock.assetPrice ?? 1) * rateLock.rate;
+
+  const fiatCharge = flatFiatCharge + extraFiatFee;
+  const cryptoCharge = flatCryptoCharge + extraCryptoFee;
+  const chargeUsd = fiatCharge / rateLock.rate;
 
   if (chargeFrom === 'fiat') {
     // Charge deducted from fiat payout — receiver gets fiatAmount - fiatCharge.
@@ -163,14 +175,15 @@ export function calculateCharges(
  * Reverse (crypto-first) charge calculation.
  *
  * Given the total crypto amount the payer will send, derives the fiat amount
- * the receiver gets after subtracting the flat platform fee.
+ * the receiver gets after subtracting the flat platform fee and optional
+ * percentage fee (e.g. first-transaction 3% on non-USDT assets).
  *
  * Algorithm (converges in ≤ 2 iterations):
  *  1. grossFiat = cryptoAmount × assetPrice × rate
- *  2. Look up tier for grossFiat → fiatCharge1
- *  3. netFiat1 = grossFiat - fiatCharge1
- *  4. Look up tier for netFiat1 → fiatCharge2 (may differ if netFiat1 crossed a boundary)
- *  5. netFiat = grossFiat - fiatCharge2  ← always stable after one correction
+ *  2. Look up tier for an initial estimate → flatFeeAmount1
+ *  3. netFiat1 = (grossFiat - flatFeeAmount1) / (1 + percentageFeeRate)
+ *  4. Look up tier for netFiat1 → flatFeeAmount2 (corrects boundary crossover)
+ *  5. netFiat = (grossFiat - flatFeeAmount2) / (1 + percentageFeeRate)
  *  6. Validate netFiat within AMOUNT_LIMITS
  *  7. Delegate to calculateCharges(netFiat, ...) for a consistent ChargeResult
  */
@@ -178,26 +191,30 @@ export function calculateChargesFromCrypto(
   cryptoAmount: number,
   crypto: CryptoCurrency,
   rateLock: RateLock,
-  tiers: FeeTier[] = DEFAULT_FEE_TIERS
+  tiers: FeeTier[] = DEFAULT_FEE_TIERS,
+  percentageFeeRate: number = 0
 ): ChargeResult & { derivedFiatAmount: number } {
   // Step 1: gross fiat equivalent of the full crypto amount
   const grossFiat = isStablecoin(crypto)
     ? cryptoAmount * rateLock.rate
-    : cryptoAmount * rateLock.assetPrice * rateLock.rate;
+    : cryptoAmount * (rateLock.assetPrice ?? 1) * rateLock.rate;
 
-  // Steps 2–3: first fee estimate
-  const tier1 = getFeeTier(grossFiat, tiers);
-  const netFiat1 = grossFiat - tier1.feeAmount;
+  const feeDivisor = percentageFeeRate > 0 ? 1 + percentageFeeRate : 1;
+
+  // Steps 2–3: first fee estimate (rough estimate for tier lookup)
+  const roughFiat = grossFiat / feeDivisor;
+  const tier1 = getFeeTier(roughFiat, tiers);
+  const netFiat1 = (grossFiat - tier1.feeAmount) / feeDivisor;
 
   // Steps 4–5: one correction pass (handles tier boundary crossover)
   const tier2 = getFeeTier(netFiat1, tiers);
-  const netFiat = grossFiat - tier2.feeAmount;
+  const netFiat = (grossFiat - tier2.feeAmount) / feeDivisor;
 
   // Step 6: validate derived fiat is within engine limits
   validateAmount(netFiat);
 
   // Step 7: canonical forward calculation — crypto-first always uses chargeFrom:'crypto'
-  const result = calculateCharges(netFiat, crypto, rateLock, tiers, 'crypto');
+  const result = calculateCharges(netFiat, crypto, rateLock, tiers, 'crypto', percentageFeeRate);
 
   return { ...result, derivedFiatAmount: netFiat };
 }

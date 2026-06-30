@@ -26,9 +26,6 @@ export const AMOUNT_LIMITS = {
   MAX: 2_000_000,
 } as const;
 
-// Extra percentage fee applied on first transaction 
-export const FIRST_TRANSACTION_FEE_RATE = 0.03;
-
 export const DEFAULT_FEE_TIERS: FeeTier[] = [
   {
     maxAmount: 100_000,

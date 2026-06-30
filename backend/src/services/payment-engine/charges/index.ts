@@ -2,7 +2,6 @@ export {
   type FeeTier,
   type ChargeResult,
   AMOUNT_LIMITS,
-  FIRST_TRANSACTION_FEE_RATE,
   DEFAULT_FEE_TIERS,
   validateAmount,
   getFeeTier,

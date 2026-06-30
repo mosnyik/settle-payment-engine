@@ -18,7 +18,9 @@ import {
 } from '../errors';
 import { generatePaymentIds } from '../utils';
 import { lockRate } from '../rate';
-import { calculateCharges, calculateChargesFromCrypto, FIRST_TRANSACTION_FEE_RATE } from '../charges';
+import { calculateCharges, calculateChargesFromCrypto } from '../charges';
+import config from '../../../config';
+import { platformConfigService } from '../../platform-config/platform-config.service';
 import { assignWallet, releaseWallet } from '../wallet';
 import { getHDWalletService } from '../hd-wallet';
 import { sessionOwnerService } from '../session-owner';
@@ -235,7 +237,9 @@ export class SessionManager {
     let resolvedInput: CreatePaymentInput = input;
 
     const firstTx = await this.isFirstTransaction(input.sessionOwnerId);
-    const percentageFeeRate = firstTx ? FIRST_TRANSACTION_FEE_RATE : 0;
+    const percentageFeeRate = firstTx
+      ? await platformConfigService.getNumber('first_transaction_fee_rate', config.fees.firstTransactionFeeRate)
+      : 0;
 
     if (input.fiatAmount === undefined && input.cryptoAmount !== undefined) {
       preLockedRate = await lockRate(
@@ -715,7 +719,9 @@ export class SessionManager {
     );
 
     const fulfillFirstTx = await this.isFirstTransaction(sessionOwnerId ?? session.sessionOwnerId);
-    const fulfillPercentageFeeRate = fulfillFirstTx ? FIRST_TRANSACTION_FEE_RATE : 0;
+    const fulfillPercentageFeeRate = fulfillFirstTx
+      ? await platformConfigService.getNumber('first_transaction_fee_rate', config.fees.firstTransactionFeeRate)
+      : 0;
 
     const charges = calculateCharges(
       session.fiatAmount,

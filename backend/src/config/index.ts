@@ -124,6 +124,12 @@ export const config = {
     secret: process.env.ADMIN_SECRET || "", // Required for admin endpoints
   },
 
+  // Fee configuration
+  fees: {
+    // Extra percentage charged on a payer's first transaction (e.g. 0.03 = 3%)
+    firstTransactionFeeRate: parseFloat(process.env.FIRST_TRANSACTION_FEE_RATE || "0.03"),
+  },
+
   // Reportly (Complaint Reporting) configuration
   reportly: {
     adminWebhookUrl: process.env.REPORTLY_ADMIN_WEBHOOK_URL || "",

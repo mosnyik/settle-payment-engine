@@ -11,6 +11,7 @@ import {
 } from "../types";
 import { RateServiceUnavailableError } from "../errors";
 import config from "../../../config";
+import { getBestRate, clearAggregatorCache } from "./rate-aggregator";
 
 interface RateData {
   exchangeRate: number;
@@ -30,26 +31,9 @@ interface CacheEntry<T> {
 }
 
 class RateCache {
-  private exchangeRateCache: CacheEntry<RateData> | null = null;
   private assetPriceCache: Map<CryptoCurrency, CacheEntry<AssetPrice>> =
     new Map();
   private readonly TTL_MS = 60 * 1000;
-
-  getExchangeRate(): RateData | null {
-    if (!this.exchangeRateCache) return null;
-    if (new Date() > this.exchangeRateCache.expiresAt) {
-      this.exchangeRateCache = null;
-      return null;
-    }
-    return this.exchangeRateCache.data;
-  }
-
-  setExchangeRate(data: RateData): void {
-    this.exchangeRateCache = {
-      data,
-      expiresAt: new Date(Date.now() + this.TTL_MS),
-    };
-  }
 
   getAssetPrice(symbol: CryptoCurrency): AssetPrice | null {
     const entry = this.assetPriceCache.get(symbol);
@@ -69,61 +53,51 @@ class RateCache {
   }
 
   clear(): void {
-    this.exchangeRateCache = null;
     this.assetPriceCache.clear();
   }
 }
 
 const cache = new RateCache();
 
-async function fetchExchangeRateFromDb(
+async function fetchExchangeRateFromAggregator(
   fiatCurrency: FiatCurrency,
 ): Promise<RateData> {
-  if (fiatCurrency !== "NGN") {
-    throw new RateServiceUnavailableError(
-      `Currency ${fiatCurrency} not supported yet`,
-    );
-  }
-
   try {
+    const quote = await getBestRate(fiatCurrency);
+
+    // Apply 1% downward adjustment so the locked rate accounts for slippage
+    const adjustment = 0.01 * quote.rate;
+    const adjustedRate = quote.rate - adjustment;
+
+    // merchant_rate / profit_rate come from the DB row; read them separately
+    // so we can still surface them without duplicating the provider abstraction.
     const pool = (await import("../../../lib/mysql")).default;
-    const [rows] = await pool.execute<any[]>("SELECT * FROM rates LIMIT 1");
-
-    if (!rows || rows.length === 0) {
-      throw new RateServiceUnavailableError("No rates found in database");
-    }
-
-    const rateRow = rows[0];
-
-    const parseRate = (value: string | number): number => {
-      if (typeof value === "number") return value;
-      return parseFloat(value.toString().replace(/,/g, ""));
+    const [rows] = await pool.execute<any[]>(
+      "SELECT merchant_rate, profit_rate FROM rates LIMIT 1",
+    );
+    const rateRow = rows?.[0] ?? {};
+    const parseDbRate = (v: unknown): number => {
+      if (typeof v === "number") return v;
+      if (v == null) return 0;
+      return parseFloat(String(v).replace(/,/g, "")) || 0;
     };
-
-    const currentRate = parseRate(rateRow.current_rate);
-    const merchantRate = parseRate(rateRow.merchant_rate || 0);
-    const profitRate = parseRate(rateRow.profit_rate || 0);
-
-    // Apply 1% adjustment
-    const percentage = 1;
-    const adjustment = (percentage / 100) * currentRate;
-    const adjustedRate = currentRate - adjustment;
 
     return {
       exchangeRate: adjustedRate,
-      merchantRate,
-      profitRate,
+      merchantRate: parseDbRate(rateRow.merchant_rate),
+      profitRate: parseDbRate(rateRow.profit_rate),
     };
   } catch (error) {
-    if (error instanceof RateServiceUnavailableError) {
-      throw error;
-    }
+    if (error instanceof RateServiceUnavailableError) throw error;
     throw new RateServiceUnavailableError(
       "Failed to fetch exchange rate",
       error instanceof Error ? error : undefined,
     );
   }
 }
+
+// Keep the old name as an internal alias so __testing__ exports still work.
+const fetchExchangeRateFromDb = fetchExchangeRateFromAggregator;
 
 async function fetchAssetPriceFromApi(
   crypto: CryptoCurrency,
@@ -166,15 +140,8 @@ async function fetchAssetPriceFromApi(
 export async function getExchangeRate(
   fiatCurrency: FiatCurrency = "NGN",
 ): Promise<RateData> {
-  const cached = cache.getExchangeRate();
-  if (cached) {
-    return cached;
-  }
-
-  const rateData = await fetchExchangeRateFromDb(fiatCurrency);
-  cache.setExchangeRate(rateData);
-
-  return rateData;
+  // Caching is handled inside the aggregator (per-provider + best-rate cache).
+  return fetchExchangeRateFromAggregator(fiatCurrency);
 }
 
 export async function getAssetPrice(crypto: CryptoCurrency): Promise<number> {
@@ -228,6 +195,7 @@ export function cryptoToFiat(cryptoAmount: number, lock: RateLock): number {
 
 export function clearRateCache(): void {
   cache.clear();
+  clearAggregatorCache();
 }
 
 export const __testing__ = {

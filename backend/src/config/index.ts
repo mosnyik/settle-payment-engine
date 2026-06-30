@@ -130,6 +130,27 @@ export const config = {
     firstTransactionFeeRate: parseFloat(process.env.FIRST_TRANSACTION_FEE_RATE || "0.03"),
   },
 
+  // Rate Engine configuration
+  rateEngine: {
+    providers: {
+      busha: {
+        enabled: process.env.BUSHA_RATE_ENABLED === 'true',
+        apiKey: process.env.BUSHA_API_KEY || '',
+        apiUrl: process.env.BUSHA_API_URL || 'https://api.busha.co',
+      },
+      liquidramp: {
+        enabled: process.env.LIQUIDRAMP_RATE_ENABLED === 'true',
+        apiKey: process.env.LIQUIDRAMP_API_KEY || '',
+        apiUrl: process.env.LIQUIDRAMP_API_URL || '',
+      },
+      anchor: {
+        enabled: process.env.ANCHOR_RATE_ENABLED === 'true',
+        apiKey: process.env.ANCHOR_API_KEY || '',
+        apiUrl: process.env.ANCHOR_API_URL || 'https://api.anchorfis.com',
+      },
+    },
+  },
+
   // Reportly (Complaint Reporting) configuration
   reportly: {
     adminWebhookUrl: process.env.REPORTLY_ADMIN_WEBHOOK_URL || "",

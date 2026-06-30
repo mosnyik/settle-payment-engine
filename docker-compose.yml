@@ -123,6 +123,38 @@ services:
     networks:
       - payment-network
 
+  rate-provider-fetcher:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: payment-rate-provider-fetcher
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=${DB_HOST:-mysql}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-2settle_db}
+      - RATE_FETCH_INTERVAL_MS=${RATE_FETCH_INTERVAL_MS:-30000}
+      # External rate providers (enable the ones you have keys for)
+      - BUSHA_RATE_ENABLED=${BUSHA_RATE_ENABLED:-false}
+      - BUSHA_API_KEY=${BUSHA_API_KEY}
+      - BUSHA_API_URL=${BUSHA_API_URL:-https://api.busha.co}
+      - LIQUIDRAMP_RATE_ENABLED=${LIQUIDRAMP_RATE_ENABLED:-false}
+      - LIQUIDRAMP_API_KEY=${LIQUIDRAMP_API_KEY}
+      - LIQUIDRAMP_API_URL=${LIQUIDRAMP_API_URL}
+      - ANCHOR_RATE_ENABLED=${ANCHOR_RATE_ENABLED:-false}
+      - ANCHOR_API_KEY=${ANCHOR_API_KEY}
+      - ANCHOR_API_URL=${ANCHOR_API_URL:-https://api.anchorfis.com}
+    command: node dist/scripts/run-rate-fetch.js
+    healthcheck:
+      disable: true
+    volumes:
+      - ./backend/logs:/app/logs
+    networks:
+      - payment-network
+
 # Networks & Volumes
 networks:
   payment-network:

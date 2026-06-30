@@ -15,6 +15,7 @@ import {
 import { createDepositWatcher, WatcherConfig } from './services/payment-engine/watcher';
 import { createHDWalletService, destroyHDWalletService } from './services/payment-engine/hd-wallet';
 import { createSweeperService, destroySweeperService, SweeperConfig } from './services/payment-engine/sweeper';
+import { startRateFetchJob, stopRateFetchJob } from './services/payment-engine/rate';
 import dotenv from "dotenv";
 import path from "path";
 // In Docker the env vars come from docker-compose. For local dev, load from
@@ -143,6 +144,9 @@ app.listen(PORT, async () => {
     console.log('Sweeper: Disabled (requires HD_WALLET_ENABLED=true and SWEEPER_ENABLED=true)');
   }
 
+  // Start rate fetch job (polls external providers; writes to provider_rates table)
+  startRateFetchJob(config.rateEngine.fetchIntervalMs);
+
   // Start deposit watcher if enabled
   if (config.watcher.enabled) {
     const watcherConfig = config.watcher as WatcherConfig;
@@ -177,6 +181,7 @@ app.listen(PORT, async () => {
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('Received SIGTERM, shutting down gracefully...');
+  stopRateFetchJob();
   const { stopDepositWatcher } = await import('./services/payment-engine/watcher');
   await stopDepositWatcher();
   destroySweeperService();
@@ -186,6 +191,7 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
   console.log('Received SIGINT, shutting down gracefully...');
+  stopRateFetchJob();
   const { stopDepositWatcher } = await import('./services/payment-engine/watcher');
   await stopDepositWatcher();
   destroySweeperService();

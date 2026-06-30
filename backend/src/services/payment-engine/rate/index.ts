@@ -7,3 +7,5 @@ export {
   cryptoToFiat,
   clearRateCache,
 } from './rate-service';
+
+export { startRateFetchJob, stopRateFetchJob } from './rate-fetch-job';

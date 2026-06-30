@@ -132,6 +132,8 @@ export const config = {
 
   // Rate Engine configuration
   rateEngine: {
+    // How often the background job fetches fresh quotes from external providers (ms)
+    fetchIntervalMs: parseInt(process.env.RATE_FETCH_INTERVAL_MS || '30000', 10),
     providers: {
       busha: {
         enabled: process.env.BUSHA_RATE_ENABLED === 'true',

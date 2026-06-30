@@ -621,7 +621,8 @@ Session moves to `settled`.
 
 - **Five Payment Types** - Transfer, Gift, Request, Merchant, and Bank Confirmation with appropriate flows
 - **Flexible Fee Charging** - `chargeFrom: fiat` or `chargeFrom: crypto` per transfer; gifts and requests always charge from crypto
-- **Rate Locking** - Freeze exchange rates during payment window
+- **Multi-Provider Rate Engine** - Compares quotes from Busha, LiquidRamp, Anchor and the internal system rate; always locks the most conservative (lowest) rate
+- **Rate Locking** - Exchange rate frozen at session creation; locked for the full payment window
 - **HD Wallet Derivation** - Unlimited unique deposit addresses from a single seed phrase
 - **Tiered Fees** - Configurable fee tiers based on transaction amount
 - **Multi-Chain** - Support for BTC, ETH, BNB, TRX, USDT, and USDC across multiple networks
@@ -646,17 +647,20 @@ Session moves to `settled`.
 │                                                              │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
 │  │   Session   │  │   Wallet    │  │   Rate    │ Charge  │ │
-│  │   Manager   │  │    Pool     │  │  Service  │ Calc    │ │
+│  │   Manager   │  │    Pool     │  │  Engine   │ Calc    │ │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                       Data Layer                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │   Sessions   │  │   Wallets    │  │      Rates       │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+          │                                    │
+          ▼                                    ▼ (background job, every 30s)
+┌──────────────────────────┐   ┌──────────────────────────────┐
+│       Data Layer          │   │     External Rate Providers  │
+│  ┌────────┐  ┌─────────┐ │   │  ┌────────┐  ┌───────────┐  │
+│  │Sessions│  │  rates  │ │   │  │ Busha  │  │LiquidRamp │  │
+│  └────────┘  └─────────┘ │   │  └────────┘  └───────────┘  │
+│  ┌─────────────────────┐ │   │  ┌────────┐                  │
+│  │   provider_rates    │◀┼───┼──│ Anchor │  (pluggable)     │
+│  └─────────────────────┘ │   │  └────────┘                  │
+└──────────────────────────┘   └──────────────────────────────┘
 ```
 
 ## Directory Structure
@@ -676,7 +680,17 @@ src/services/payment-engine/
 │   └── wallet-pool.ts       # Wallet assignment/release
 │
 ├── rate/
-│   └── rate-service.ts      # Rate fetching & locking
+│   ├── rate-service.ts      # Rate fetching, locking, crypto conversion
+│   ├── rate-aggregator.ts   # Compares all provider quotes, selects lowest
+│   ├── rate-fetch-job.ts    # Background job: polls providers every 30s → DB
+│   ├── update-rate-job.ts   # Background job: updates system rate from CoinGecko
+│   └── providers/
+│       ├── types.ts         # RateProvider interface & RateQuote type
+│       ├── http-provider.ts # Abstract base: fetchRate() reads DB, fetchLiveRate() does HTTP
+│       ├── system.ts        # System provider: reads internal rates table
+│       ├── busha.ts         # Busha adapter (plug in endpoint + parseResponse)
+│       ├── liquidramp.ts    # LiquidRamp adapter
+│       └── anchor.ts        # Anchor adapter
 │
 ├── charges/
 │   └── charge-calculator.ts # Fee calculation
@@ -771,6 +785,83 @@ src/services/payment-engine/
 | TRX | `tron` |
 | USDT | `erc20`, `bep20`, `trc20` |
 | USDC | `erc20`, `bep20` |
+
+## Rate Engine
+
+The rate engine selects the exchange rate used to lock each payment session. It compares quotes from the internal system rate and any enabled external providers, always choosing the lowest (most conservative) rate.
+
+### How it works
+
+**Transaction path (zero external API calls):**
+
+```
+lockRate()
+  → RateAggregator.getBestRate()
+      → reads in-memory cache (60s TTL, shared within the process)
+      → or: each provider reads its row from provider_rates table
+      → selectBest: min(all quotes)
+```
+
+**Background job (the only thing that calls external APIs):**
+
+```
+RateFetchJob (every 30s)
+  → provider.fetchLiveRate()    ← HTTP call to Busha / LiquidRamp / Anchor
+  → INSERT ... ON DUPLICATE KEY UPDATE provider_rates
+  → clearAggregatorCache()      ← next transaction sees fresh rates
+```
+
+This decoupling means external provider APIs are called at most ~120 times per hour regardless of transaction volume.
+
+### Selection rule
+
+The system rate acts as a ceiling:
+
+| System | Busha | LiquidRamp | Selected |
+|--------|-------|------------|----------|
+| 1600 | 1580 | 1570 | **1570** (LiquidRamp — lowest of all) |
+| 1600 | 1650 | 1640 | **1600** (system — lowest of all) |
+| 1600 | 1580 | *(failed)* | **1580** (Busha — below system) |
+| 1600 | *(failed)* | *(failed)* | **1600** (system fallback) |
+
+If a provider's cached rate is more than 5 minutes old (stale), it is skipped for that round.
+
+### Adding a provider
+
+1. Create `src/services/payment-engine/rate/providers/yourprovider.ts` extending `HttpRateProvider`
+2. Implement `buildRequest()` (Axios config) and `parseResponse()` (extract NGN/USD rate)
+3. Register it in `rate-fetch-job.ts` `HTTP_PROVIDERS` array and `rate-aggregator.ts` `ALL_PROVIDERS` array
+4. Add config block to `config/index.ts` and corresponding env vars
+
+### Activating a provider
+
+```env
+# Enable one or more external providers
+BUSHA_RATE_ENABLED=true
+BUSHA_API_KEY=your_key
+BUSHA_API_URL=https://api.busha.co
+
+LIQUIDRAMP_RATE_ENABLED=true
+LIQUIDRAMP_API_KEY=your_key
+LIQUIDRAMP_API_URL=https://api.liquidramp.com
+
+ANCHOR_RATE_ENABLED=true
+ANCHOR_API_KEY=your_key
+ANCHOR_API_URL=https://api.anchorfis.com
+
+# How often the background job polls providers (default 30s)
+RATE_FETCH_INTERVAL_MS=30000
+```
+
+### Database migration
+
+Run before starting the server for the first time with external providers enabled:
+
+```sql
+source src/services/payment-engine/migrations/013_create_provider_rates.sql
+```
+
+---
 
 ## Configuration
 

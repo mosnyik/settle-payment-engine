@@ -651,7 +651,8 @@ A summary row with totals (fiat volume, charges, net fiat, USD volume) is append
 
 - **Five Transaction Types** - Transfer, Gift, Request, Merchant checkout, Bank confirmation rail
 - **Sandbox / Testnet Mode** - `pk_test_` keys with simulate-deposit endpoint for end-to-end testing without real crypto
-- **Rate Locking** - Freeze exchange rates during payment window
+- **Multi-Provider Rate Engine** - Compares quotes from Busha, LiquidRamp, Anchor, and the internal system rate each session; always locks the lowest (most conservative) rate. External APIs are polled by a background job every 30 seconds — never per transaction — so rate limits are not a concern at any volume
+- **Rate Locking** - Exchange rate frozen at session creation for the full payment window
 - **HD Wallet Derivation** - BIP32/44/84, unlimited unique deposit addresses
 - **Tiered Fees** - Configurable fee tiers based on transaction amount
 - **Multi-Chain** - Support for BTC, ETH, BNB, TRX, USDT and USDC (ERC20/BEP20/TRC20)
@@ -677,17 +678,20 @@ A summary row with totals (fiat volume, charges, net fiat, USD volume) is append
 │                                                              │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
 │  │   Session   │  │   Wallet    │  │   Rate    │ Charge  │ │
-│  │   Manager   │  │    Pool     │  │  Service  │ Calc    │ │
+│  │   Manager   │  │    Pool     │  │  Engine   │ Calc    │ │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                       Data Layer                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │   Sessions   │  │   Wallets    │  │      Rates       │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+          │                                    │
+          ▼                          ▼ background job (30s)
+┌──────────────────────────┐   ┌──────────────────────────────┐
+│       Data Layer          │   │   External Rate Providers    │
+│  ┌────────┐  ┌─────────┐ │   │  ┌────────┐  ┌───────────┐  │
+│  │Sessions│  │  rates  │ │   │  │ Busha  │  │LiquidRamp │  │
+│  └────────┘  └─────────┘ │   │  └────────┘  └───────────┘  │
+│  ┌─────────────────────┐ │   │  ┌────────┐  + pluggable     │
+│  │   provider_rates    │◀┼───┘  │ Anchor │                  │
+│  └─────────────────────┘ │      └────────┘                  │
+└──────────────────────────┘   └──────────────────────────────┘
 ```
 
 ## Payment Session Lifecycle

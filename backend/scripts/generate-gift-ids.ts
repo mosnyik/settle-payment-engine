@@ -139,6 +139,7 @@ async function main(): Promise<void> {
 
   const poolModule = await import('../src/lib/mysql');
   const pool = poolModule.pool;
+  const { sessionRepository } = await import('../src/services/payment-engine/session');
 
   const createdGifts: Array<{
     gift_id: string;
@@ -169,21 +170,14 @@ async function main(): Promise<void> {
     await paymentEngine.setPayerId(session.id, payerId);
 
     const now = new Date();
-    await pool.query(
-      `UPDATE payment_sessions
-       SET status = 'confirmed',
-           confirmed_at = ?,
-           settled_at = NULL,
-           updated_at = ?
-       WHERE id = ?`,
-      [now, now, session.id]
-    );
+    await sessionRepository.update(session.id, { status: 'confirmed', confirmedAt: now });
 
     const updatedSession = await paymentEngine.getPayment(session.id);
+    if (!updatedSession.giftId) throw new Error('Confirmed gift has no claim code.');
     await legacySyncService.syncToLegacy(updatedSession);
 
     createdGifts.push({
-      gift_id: updatedSession.reference,
+      gift_id: updatedSession.giftId,
       payment_id: updatedSession.id,
       fiat_amount: updatedSession.fiatAmount,
       crypto_amount: updatedSession.cryptoAmount,
@@ -198,6 +192,7 @@ async function main(): Promise<void> {
   console.log(JSON.stringify(createdGifts, null, 2));
   console.log('Gift ID array:');
   console.log(JSON.stringify(createdGifts.map((gift) => gift.gift_id), null, 2));
+  await pool.end();
 }
 
 main().catch((error: Error) => {

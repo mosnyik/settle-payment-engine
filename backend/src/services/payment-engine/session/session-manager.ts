@@ -257,7 +257,9 @@ export class SessionManager {
       resolvedInput = { ...input, fiatAmount: reverseResult.derivedFiatAmount };
     }
 
-    let ids = generatePaymentIds();
+    let ids = { ...generatePaymentIds() };
+    // GP is a payment tracking reference, never a shareable/claimable gift code.
+    if (input.type === 'gift') ids.reference = `GP-${ids.reference.slice(3)}`;
     let attempts = 0;
     const maxAttempts = 5;
 
@@ -266,7 +268,8 @@ export class SessionManager {
       if (attempts >= maxAttempts) {
         throw new Error('Failed to generate unique reference after multiple attempts');
       }
-      ids = generatePaymentIds();
+      ids = { ...generatePaymentIds() };
+      if (input.type === 'gift') ids.reference = `GP-${ids.reference.slice(3)}`;
     }
 
     // For requests without crypto/network, create session without wallet assignment
@@ -492,6 +495,12 @@ export class SessionManager {
       receivedAmount,
       ...actualReceivedUpdate,
     });
+  }
+
+  async getSessionByGiftId(giftId: string): Promise<PaymentSession> {
+    const session = await this.repository.findByGiftId(giftId);
+    if (!session) throw new SessionNotFoundError(giftId);
+    return session;
   }
 
   async confirmDeposit(id: string, confirmations: number): Promise<PaymentSession> {

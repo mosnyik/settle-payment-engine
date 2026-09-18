@@ -2,6 +2,8 @@
  * ID Generator
  */
 
+import { randomInt } from 'crypto';
+
 const MACHINE_ID_CHARS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 const HUMAN_REF_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
@@ -24,6 +26,13 @@ export function generatePaymentReference(): string {
   const prefix = '2S-';
   const randomPart = generateRandomString(6, HUMAN_REF_CHARS);
   return prefix + randomPart;
+}
+
+/** Claim codes are generated only at funding confirmation, not at creation. */
+export function generateGiftId(): string {
+  return '2S-' + Array.from({ length: 6 }, () =>
+    HUMAN_REF_CHARS[randomInt(HUMAN_REF_CHARS.length)]
+  ).join('');
 }
 
 export function generatePaymentIds(): { id: string; reference: string } {

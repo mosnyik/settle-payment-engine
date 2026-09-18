@@ -22,6 +22,7 @@ import Logo from '@/components/Logo'
 interface Payment {
   id: string
   reference: string
+  giftId: string | null
   type: string
   status: string
   depositAddress: string | null
@@ -436,11 +437,19 @@ function SuccessState({ payment }: { payment: Payment }) {
       <div className="space-y-2">
         <h3 className="text-xl font-bold text-slate-800">Payment Complete!</h3>
         <p className="text-sm text-slate-500">
-          {formatFiat(payment.fiatAmount, payment.fiatCurrency)} will be credited shortly.
+          {payment.type === 'gift'
+            ? 'Your gift is funded. Share the gift ID below with the recipient.'
+            : `${formatFiat(payment.fiatAmount, payment.fiatCurrency)} will be credited shortly.`}
         </p>
       </div>
 
       <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl space-y-2 text-left">
+        {payment.type === 'gift' && payment.giftId && (
+          <div className="flex justify-between text-sm">
+            <span className="text-slate-500">Gift ID</span>
+            <span className="font-mono font-semibold text-slate-700 select-all">{payment.giftId}</span>
+          </div>
+        )}
         <div className="flex justify-between text-sm">
           <span className="text-slate-500">Reference</span>
           <span className="font-mono font-semibold text-slate-700">{payment.reference}</span>
@@ -610,6 +619,9 @@ export default function PaymentPage() {
       try {
         const parsed = new URL(url)
         parsed.searchParams.set('reference', payment.reference)
+        if (payment.type === 'gift' && payment.giftId) {
+          parsed.searchParams.set('giftId', payment.giftId)
+        }
         parsed.searchParams.set('status', payment.status)
         window.location.href = parsed.toString()
       } catch {
@@ -618,7 +630,7 @@ export default function PaymentPage() {
     }, 3000)
 
     return () => clearTimeout(timer)
-  }, [payment?.status, payment?.reference])
+  }, [payment?.status, payment?.reference, payment?.giftId, payment?.type])
 
   // -------------------------------------------------------------------------
   // Render

@@ -39,6 +39,8 @@ export class LegacySyncService {
    * @param session - Payment session to sync
    */
   async syncToLegacy(session: PaymentSession): Promise<void> {
+    // There is no gift record or code to sync before confirmed funding.
+    if (session.type === 'gift' && !session.giftId) return;
     try {
       switch (session.type) {
         case 'transfer':
@@ -129,12 +131,15 @@ export class LegacySyncService {
    */
   private async syncGift(session: PaymentSession): Promise<void> {
     const pool = (await import('../../../lib/mysql')).default;
-    const legacyStatus = STATUS_MAP[session.status];
+    const legacyStatus = session.status === 'confirmed' && !session.receiverId
+      ? 'Successful'
+      : STATUS_MAP[session.status];
+    const giftStatus = session.receiverId ? 'Claimed' : 'Not claimed';
 
     // Check if gift already exists
     const [existing] = await pool.query(
       `SELECT id FROM gifts WHERE gift_id = ? LIMIT 1`,
-      [session.reference]
+      [session.giftId]
     ) as [any[], any];
 
     if (existing && existing.length > 0) {
@@ -149,13 +154,13 @@ export class LegacySyncService {
              receiver_id = ?
          WHERE gift_id = ?`,
         [
-          legacyStatus,
+          giftStatus,
           legacyStatus,
           session.depositAddress,
           session.cryptoAmount,
           session.rate,
           session.receiverId || null,
-          session.reference,
+          session.giftId,
         ]
       );
     } else {
@@ -168,8 +173,8 @@ export class LegacySyncService {
           wallet_address, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          session.reference,
-          legacyStatus,
+          session.giftId,
+          giftStatus,
           session.crypto,
           session.network,
           session.crypto,
@@ -269,7 +274,7 @@ export class LegacySyncService {
 
     const [txRows] = await pool.query(
       `SELECT id FROM ${table} WHERE ${idColumn} = ? LIMIT 1`,
-      [session.reference]
+      [session.type === 'gift' ? session.giftId : session.reference]
     ) as [any[], any];
 
     if (!txRows || txRows.length === 0) {

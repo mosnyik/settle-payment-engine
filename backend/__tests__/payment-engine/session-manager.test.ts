@@ -235,6 +235,12 @@ describe('SessionManager', () => {
   // ===========================================================================
 
   describe('createSession', () => {
+    it('creates only a tracking reference, without a gift claim code', async () => {
+      const session = await manager.createSession({ ...validInput, type: 'gift', receiver: undefined });
+      expect(session.reference).toBe('GP-TEST12');
+      expect(session.giftId).toBeUndefined();
+      expect(session.status).toBe('pending');
+    });
     it('should create a session with valid input', async () => {
       const session = await manager.createSession(validInput);
 

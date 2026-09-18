@@ -36,6 +36,7 @@ import { sendWebhook } from '../../wallet-api/webhook.service';
 import { getApiKeyById, getWebhookConfig } from '../../../security/services/apiKey.service';
 import { sendPaymentWebhook } from '../payment-webhook.service';
 import { settlementService } from '../settlement/settlement.service';
+import { legacySyncService } from '../sync';
 
 // =============================================================================
 // TYPES
@@ -920,7 +921,8 @@ export class DepositWatcher extends EventEmitter {
     if (tx.confirmations >= effectiveRequired) {
       // Confirmed!
       try {
-        await sessionManager.confirmDeposit(session.id, tx.confirmations);
+        const confirmedSession = await sessionManager.confirmDeposit(session.id, tx.confirmations);
+        await legacySyncService.syncToLegacy(confirmedSession);
 
         sendPaymentWebhook(session.id, 'payment.confirmed').catch(() => {});
 

@@ -12,6 +12,7 @@ import {
   HDChain,
 } from '../types';
 import { SessionNotFoundError, DatabaseError } from '../errors';
+import { generateGiftId } from '../utils/id-generator';
 
 export interface CreateSessionData {
   id: string;
@@ -77,6 +78,7 @@ function rowToSession(row: any): PaymentSession {
   return {
     id: row.id,
     reference: row.reference,
+    giftId: row.gift_id || undefined,
     type: row.type as PaymentType,
     status: row.status as PaymentStatus,
     fiatAmount: Number(row.fiat_amount),
@@ -108,7 +110,11 @@ function rowToSession(row: any): PaymentSession {
     expiresAt: new Date(row.expires_at),
     confirmedAt: row.confirmed_at ? new Date(row.confirmed_at) : undefined,
     settledAt: row.settled_at ? new Date(row.settled_at) : undefined,
-    metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+    metadata: row.metadata
+      ? typeof row.metadata === 'string'
+        ? JSON.parse(row.metadata)
+        : row.metadata
+      : undefined,
     bankRef: row.bank_ref || undefined,
     isSandbox: Boolean(row.is_sandbox),
   };
@@ -226,6 +232,19 @@ export class SessionRepository {
       return (rows || []).map(rowToSession);
     } catch (error) {
       throw new DatabaseError('find sessions by status', error instanceof Error ? error : undefined);
+    }
+  }
+
+  async findByGiftId(giftId: string): Promise<PaymentSession | null> {
+    const pool = (await import('../../../lib/mysql')).default;
+    try {
+      const [rows] = await pool.query<any[]>(
+        "SELECT * FROM payment_sessions WHERE type = 'gift' AND gift_id = ? LIMIT 1",
+        [giftId]
+      );
+      return rows.length ? rowToSession(rows[0]) : null;
+    } catch (error) {
+      throw new DatabaseError('find gift by id', error instanceof Error ? error : undefined);
     }
   }
 
@@ -349,6 +368,13 @@ export class SessionRepository {
       updates.push('status = ?');
       values.push(data.status);
     }
+    // Confirmation and code allocation happen in the SAME database update.
+    // COALESCE ensures concurrent/repeated confirmations preserve the first code.
+    const giftCodeIndex = data.status === 'confirmed' ? values.length : -1;
+    if (giftCodeIndex >= 0) {
+      updates.push("gift_id = CASE WHEN type = 'gift' THEN COALESCE(gift_id, ?) ELSE gift_id END");
+      values.push(generateGiftId());
+    }
     if (data.txHash !== undefined) {
       updates.push('tx_hash = ?');
       values.push(data.txHash);
@@ -461,10 +487,30 @@ export class SessionRepository {
     }
 
     try {
-      await pool.query(
-        `UPDATE payment_sessions SET ${updates.join(', ')} WHERE id = ?`,
-        values
-      );
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          const [result] = await pool.query<any>(
+            `UPDATE payment_sessions SET ${updates.join(', ')} WHERE id = ?` +
+              (giftCodeIndex >= 0
+                ? " AND (type <> 'gift' OR gift_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM gifts WHERE gift_id = ?))"
+                : ''),
+            giftCodeIndex >= 0 ? [...values, values[giftCodeIndex]] : values
+          );
+          // Historical unpaid legacy rows also reserve their already-known
+          // codes. Never accidentally assign one of those codes to a new gift.
+          if (giftCodeIndex >= 0 && result.affectedRows === 0) {
+            if (attempt === 4) throw new Error('Could not allocate a unique gift code.');
+            values[giftCodeIndex] = generateGiftId();
+            continue;
+          }
+          break;
+        } catch (error) {
+          if (giftCodeIndex < 0 || (error as { code?: string }).code !== 'ER_DUP_ENTRY' || attempt === 4) {
+            throw error;
+          }
+          values[giftCodeIndex] = generateGiftId();
+        }
+      }
 
       const session = await this.findById(id);
       if (!session) {

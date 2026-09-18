@@ -142,6 +142,10 @@ export class PaymentEngine {
     return this.manager.getSessionByReference(reference);
   }
 
+  async getPaymentByGiftId(giftId: string): Promise<PaymentSession> {
+    return this.manager.getSessionByGiftId(giftId);
+  }
+
   /**
    * Record a deposit detected on-chain.
    *

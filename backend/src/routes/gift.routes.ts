@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import pool from '../lib/mysql';
-import { saveGiftTransaction, getOrCreateReceiver } from '../services/transaction';
-import { giftSchema, giftUpdateSchema } from '../validation';
+import { getOrCreateReceiver } from '../services/transaction';
+import { giftUpdateSchema } from '../validation';
 import { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import axios from 'axios';
 import config from '../config';
@@ -9,22 +9,10 @@ import config from '../config';
 const router = Router();
 
 // POST /gifts/save
-router.post('/save', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const parsed = giftSchema.safeParse(req.body);
-
-    if (!parsed.success) {
-      return res.status(400).json({
-        error: 'Invalid gift input',
-        details: parsed.error.flatten(),
-      });
-    }
-
-    const giftId = await saveGiftTransaction(parsed.data);
-    return res.status(200).json({ giftId });
-  } catch (err: any) {
-    next(err);
-  }
+router.post('/save', (_req: Request, res: Response) => {
+  return res.status(410).json({
+    error: 'Use POST /v1/payments with type gift. A giftId is issued only after funding is confirmed.',
+  });
 });
 
 // GET /gifts/check
@@ -36,8 +24,8 @@ router.get('/check', async (req: Request, res: Response, next: NextFunction) => 
       return res.status(400).json({ message: 'gift_id is required' });
     }
 
-    if (String(gift_id).length !== 6) {
-      return res.status(400).json({ message: 'gift_id must be 6 characters' });
+    if (!/^(?:[A-Za-z0-9]{6}|2S-[A-Z0-9]{6})$/.test(String(gift_id))) {
+      return res.status(400).json({ message: 'Invalid gift_id format' });
     }
 
     const [rows] = await pool.query<RowDataPacket[]>(

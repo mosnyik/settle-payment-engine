@@ -213,7 +213,10 @@ A gift lets the sender pay crypto upfront without knowing the recipient's bank d
 
 #### Phase 1 — Sender creates the gift
 
-No receiver needed at creation. The sender gets a deposit address and shares the `reference` with the recipient.
+No receiver needed at creation. The sender gets a deposit address and an internal
+payment `reference` (`GP-...`), but `giftId` is null. Only after on-chain confirmation
+does the backend generate a shareable `giftId` (`2S-...`). See the
+[migration and integration guide](backend/docs/DEFERRED_GIFT_IDS.md) before deployment.
 
 **Fiat-first** (recipient receives a specific NGN amount):
 
@@ -259,7 +262,8 @@ POST /v1/payments
   "success": true,
   "payment": {
     "id": 31,
-    "reference": "2S-GFT4XW",
+    "reference": "GP-GFT4XW",
+    "giftId": null,
     "type": "gift",
     "status": "pending",
     "depositAddress": "TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop",
@@ -275,7 +279,10 @@ POST /v1/payments
 }
 ```
 
-Sender pays `cryptoAmount` to `depositAddress`, then shares `reference` (`2S-GFT4XW`) with the recipient.
+Sender pays `cryptoAmount` to `depositAddress`, then polls
+`GET /v1/payments/GP-GFT4XW`. After confirmation, share the returned `giftId`
+(`2S-GFT4XW` in this example), never the tracking reference. The recipient can
+check `GET /v1/payments/gifts/2S-GFT4XW`.
 
 ---
 
@@ -344,7 +351,8 @@ Content-Type: application/json
   "message": "Gift claimed successfully. Payout is being processed.",
   "payment": {
     "id": 31,
-    "reference": "2S-GFT4XW",
+    "reference": "GP-GFT4XW",
+    "giftId": "2S-GFT4XW",
     "status": "settling",
     "receiver": {
       "accountName": "JOHN DOE",

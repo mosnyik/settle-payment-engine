@@ -228,7 +228,10 @@ A gift lets the sender pay crypto upfront without knowing the recipient's bank d
 
 #### Phase 1 — Sender creates the gift
 
-No receiver needed at creation — it is set at claim time. The fee is always charged from crypto (payer bears it). The sender gets a deposit address and shares the `reference` with the recipient.
+No receiver needed at creation — it is set at claim time. The sender gets a deposit
+address and an internal tracking `reference` (`GP-...`), but `giftId` is null.
+After on-chain confirmation, the backend generates a separate shareable `giftId`
+(`2S-...`). See [Deferred gift IDs](docs/DEFERRED_GIFT_IDS.md) for deployment order.
 
 **Fiat-first** (recipient receives a specific NGN amount):
 
@@ -273,7 +276,8 @@ POST /v1/payments
 {
   "success": true,
   "payment": {
-    "reference": "2S-GFT4XW",
+    "reference": "GP-GFT4XW",
+    "giftId": null,
     "type": "gift",
     "status": "pending",
     "depositAddress": "TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop",
@@ -294,7 +298,10 @@ POST /v1/payments
 }
 ```
 
-Sender pays `cryptoAmount` to `depositAddress`, then shares `reference` (`2S-GFT4XW`) with the recipient.
+Sender pays `cryptoAmount` to `depositAddress`, then polls
+`GET /v1/payments/GP-GFT4XW`. After confirmation, share the returned `giftId`
+(`2S-GFT4XW` in this example), never the tracking reference. The recipient can
+check `GET /v1/payments/gifts/2S-GFT4XW`.
 
 ---
 
@@ -363,7 +370,8 @@ Content-Type: application/json
   "message": "Gift claimed successfully. Payout is being processed.",
   "payment": {
     "id": 31,
-    "reference": "2S-GFT4XW",
+    "reference": "GP-GFT4XW",
+    "giftId": "2S-GFT4XW",
     "status": "settling",
     "receiver": {
       "accountName": "JOHN DOE",
@@ -884,6 +892,10 @@ const DEFAULT_CONFIG = {
 ```
 
 ## Utility Scripts
+
+For the normal user gift flow, see [Deferred gift IDs](docs/DEFERRED_GIFT_IDS.md).
+Gift codes are issued only after funding is confirmed; payment references are
+used separately for tracking. Apply migration 012 before deploying this change.
 
 ### Generate Paid Gifts
 

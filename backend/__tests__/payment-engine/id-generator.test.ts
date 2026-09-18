@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   generatePaymentId,
+  generateGiftId,
   generatePaymentReference,
   generatePaymentIds,
   isValidPaymentId,
@@ -15,6 +16,11 @@ import {
 } from '@/services/payment-engine/utils/id-generator';
 
 describe('ID Generator', () => {
+  it('generates valid cryptographically random gift claim codes', () => {
+    for (let i = 0; i < 100; i += 1) {
+      expect(isValidPaymentReference(generateGiftId())).toBe(true);
+    }
+  });
   // ===========================================================================
   // generatePaymentId
   // ===========================================================================

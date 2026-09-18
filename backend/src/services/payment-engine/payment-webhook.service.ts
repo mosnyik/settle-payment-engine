@@ -25,6 +25,7 @@ export type PaymentWebhookEvent =
 interface SessionWebhookRow extends RowDataPacket {
   id: string;
   reference: string;
+  gift_id: string | null;
   type: string;
   status: string;
   fiat_amount: number;
@@ -56,7 +57,7 @@ export async function sendPaymentWebhook(
 ): Promise<void> {
   try {
     const [rows] = await pool.query<SessionWebhookRow[]>(
-      `SELECT ps.id, ps.reference, ps.type, ps.status,
+      `SELECT ps.id, ps.reference, ps.gift_id, ps.type, ps.status,
               ps.fiat_amount, ps.fiat_currency, ps.crypto_amount, ps.crypto,
               ps.network, ps.tx_hash, ps.received_amount, ps.settled_fiat_amount, ps.metadata,
               ak.webhook_url, ak.webhook_secret
@@ -79,6 +80,7 @@ export async function sendPaymentWebhook(
       payment: {
         id: row.id,
         reference: row.reference,
+        giftId: row.gift_id ?? null,
         type: row.type,
         status: row.status,
         fiatAmount: Number(row.fiat_amount),

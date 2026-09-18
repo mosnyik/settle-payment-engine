@@ -127,6 +127,8 @@ export type HDChain = 'bitcoin' | 'ethereum' | 'tron';
 export interface PaymentSession {
   id: string;
   reference: string;
+  /** Shareable gift code. Absent until crypto payment is confirmed. */
+  giftId?: string;
   type: PaymentType;
   status: PaymentStatus;
   fiatAmount: number;

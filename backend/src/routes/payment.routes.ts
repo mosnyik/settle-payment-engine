@@ -219,6 +219,7 @@ router.post(
       payment: {
         id: updatedSession.id,
         reference: updatedSession.reference,
+        giftId: updatedSession.giftId ?? null,
         type: updatedSession.type,
         status: updatedSession.status,
         depositAddress: updatedSession.depositAddress,
@@ -382,25 +383,28 @@ router.post(
  * Requires 'payment:read' permission.
  */
 router.get(
-  '/:reference',
+  ['/:reference', '/gifts/:giftId'],
   async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { reference } = req.params;
+    const { reference, giftId } = req.params;
 
-    if (!reference) {
+    if (!reference && !giftId) {
       return res.status(400).json({
         success: false,
         error: 'Reference is required',
       });
     }
 
-    const session = await paymentEngine.getPaymentByReference(reference);
+    const session = giftId
+      ? await paymentEngine.getPaymentByGiftId(giftId)
+      : await paymentEngine.getPaymentByReference(reference);
 
     return res.json({
       success: true,
       payment: {
         id: session.id,
         reference: session.reference,
+        giftId: session.giftId ?? null,
         type: session.type,
         status: session.status,
         depositAddress: session.depositAddress,
@@ -457,7 +461,7 @@ router.post(
       }
 
       // Re-validate the gift (guard against race conditions)
-      const session = await paymentEngine.getPaymentByReference(reference);
+      const session = await paymentEngine.getPaymentByGiftId(reference);
 
       if (session.type !== 'gift') {
         return res.status(400).json({ success: false, error: 'Payment is not a gift' });
@@ -501,6 +505,7 @@ router.post(
         payment: {
           id: updatedSession.id,
           reference: updatedSession.reference,
+          giftId: updatedSession.giftId ?? null,
           status: updatedSession.status,
           receiver: {
             accountName: resolved.accountName,

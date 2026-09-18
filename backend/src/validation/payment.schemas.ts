@@ -100,6 +100,14 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
   const hasFiat = data.fiatAmount !== undefined;
   const hasCrypto = data.cryptoAmount !== undefined;
 
+  if (data.type === 'gift' && data.autoSettle) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Gifts must be funded and confirmed before a claim code is issued; autoSettle is not supported.',
+      path: ['autoSettle'],
+    });
+  }
+
   // Requests are fiat-only — cryptoAmount is never valid
   if ((data.type === 'request') && hasCrypto) {
     ctx.addIssue({

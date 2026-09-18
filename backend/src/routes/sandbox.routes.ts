@@ -85,12 +85,14 @@ router.post(
         return res.json({
           status: true,
           message: 'Deposit simulated — stopped at confirming',
-          data: { reference, status: updated.status, txHash: fakeTxHash, receivedAmount },
+          data: { reference, giftId: updated.giftId ?? null, status: updated.status, txHash: fakeTxHash, receivedAmount },
         });
       }
 
       // Step 2: confirming → confirmed
-      await sessionManager.confirmDeposit(session.id, 1);
+      const confirmedGift = await sessionManager.confirmDeposit(session.id, 1);
+      const { legacySyncService } = await import('../services/payment-engine/sync');
+      await legacySyncService.syncToLegacy(confirmedGift);
       sendPaymentWebhook(session.id, 'payment.confirmed').catch(() => {});
 
       if (steps === 'confirmed') {
@@ -98,18 +100,19 @@ router.post(
         return res.json({
           status: true,
           message: 'Deposit simulated — stopped at confirmed',
-          data: { reference, status: updated.status, txHash: fakeTxHash, receivedAmount },
+          data: { reference, giftId: updated.giftId ?? null, status: updated.status, txHash: fakeTxHash, receivedAmount },
         });
       }
 
       // Step 3: confirmed → settling → settled (sandbox short-circuit in settlement service)
-      await settlementService.settleSession(session.id);
+      // A funded gift waits for a recipient even in sandbox mode.
+      if (session.type !== 'gift') await settlementService.settleSession(session.id);
 
       const final = await sessionManager.getSession(session.id);
       return res.json({
         status: true,
-        message: 'Deposit simulated — payment settled',
-        data: { reference, status: final.status, txHash: fakeTxHash, receivedAmount },
+        message: session.type === 'gift' ? 'Deposit simulated — gift ready to claim' : 'Deposit simulated — payment settled',
+        data: { reference, giftId: final.giftId ?? null, status: final.status, txHash: fakeTxHash, receivedAmount },
       });
     } catch (err) {
       next(err);

@@ -7,7 +7,7 @@ import pool from '../../../lib/mysql';
 import { RowDataPacket } from 'mysql2';
 import { generateUUID } from '../../../security/utils/crypto';
 import { IdentityType, User, UserIdentity } from '../types';
-import { UserNotFoundError } from '../errors';
+import { IdentityAlreadyLinkedError, UserNotFoundError } from '../errors';
 
 interface UserRow extends RowDataPacket {
   id: string;
@@ -94,7 +94,7 @@ export async function linkIdentity(
   );
 }
 
-async function markIdentityVerified(identityId: number): Promise<void> {
+export async function markIdentityVerified(identityId: number): Promise<void> {
   await pool.query(
     `UPDATE user_identities SET verified_at = COALESCE(verified_at, NOW()) WHERE id = ?`,
     [identityId]
@@ -123,6 +123,37 @@ export async function findOrCreateUserByIdentity(
   const user = await createUser();
   await linkIdentity(user.id, type, identifier, verified);
   return user;
+}
+
+/**
+ * Attach a newly-proven identity (phone/email/wallet) to the currently
+ * authenticated user's account, once the caller has already verified
+ * ownership (OTP code or wallet signature checked out).
+ *
+ * Idempotent if the identity already belongs to this same user. Rejects if
+ * it belongs to a different account — cross-account takeover is not allowed
+ * here, unlike the Google login flow's automatic email match, which is safe
+ * only because Google itself attests the email.
+ */
+export async function linkIdentityToUser(
+  userId: string,
+  type: IdentityType,
+  identifier: string
+): Promise<UserIdentity> {
+  const existing = await getIdentity(type, identifier);
+
+  if (existing) {
+    if (existing.userId !== userId) {
+      throw new IdentityAlreadyLinkedError(type);
+    }
+    if (!existing.verifiedAt) {
+      await markIdentityVerified(existing.id);
+    }
+    return (await getIdentity(type, identifier))!;
+  }
+
+  await linkIdentity(userId, type, identifier, true);
+  return (await getIdentity(type, identifier))!;
 }
 
 /**

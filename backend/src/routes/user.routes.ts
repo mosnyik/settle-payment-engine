@@ -12,9 +12,15 @@ import {
   getIdentitiesForUser,
   updateUserProfile,
 } from '../services/user-auth/services/user.service';
+import { verifyOtpForLinking } from '../services/user-auth/services/otp.service';
+import { verifySignatureForLinking } from '../services/user-auth/services/wallet-auth.service';
 import { UserNotFoundError } from '../services/user-auth/errors';
 import { normalizePhone, phoneVariants } from '../utils/phone';
-import { updateProfileSchema } from '../validation/user-auth.schemas';
+import {
+  updateProfileSchema,
+  otpVerifySchema,
+  walletVerifySchema,
+} from '../validation/user-auth.schemas';
 
 const router = Router();
 
@@ -56,6 +62,47 @@ router.patch('/', async (req: Request, res: Response, next: NextFunction) => {
 
     const user = await updateUserProfile(req.endUser!.id, parsed.data);
     res.json({ success: true, data: { user } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /v1/users/me/identities/otp/verify
+ *
+ * Link a phone or email to the caller's account. Request the code first via
+ * the existing public POST /v1/users/auth/otp/request (same endpoint used
+ * for login) — there's no separate linking-specific send step. Verifying
+ * the code here proves ownership and attaches the identity to req.endUser
+ * instead of logging into whichever account it resolves to.
+ *
+ * 409s if the identifier is already linked to a different account.
+ */
+router.post('/identities/otp/verify', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { channel, identifier, code } = otpVerifySchema.parse(req.body);
+    const identity = await verifyOtpForLinking(req.endUser!.id, channel, identifier, code);
+    res.json({ success: true, data: { identity } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /v1/users/me/identities/wallet/verify
+ *
+ * Link a wallet address to the caller's account. Request the nonce first via
+ * the existing public POST /v1/users/auth/wallet/nonce (same endpoint used
+ * for login), sign it with the wallet, then verify here to attach it to
+ * req.endUser instead of logging into whichever account it resolves to.
+ *
+ * 409s if the wallet is already linked to a different account.
+ */
+router.post('/identities/wallet/verify', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { address, signature } = walletVerifySchema.parse(req.body);
+    const identity = await verifySignatureForLinking(req.endUser!.id, address, signature);
+    res.json({ success: true, data: { identity } });
   } catch (err) {
     next(err);
   }

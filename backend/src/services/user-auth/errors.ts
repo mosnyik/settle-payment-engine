@@ -67,6 +67,12 @@ export class UserNotFoundError extends UserAuthError {
   }
 }
 
+export class IdentityAlreadyLinkedError extends UserAuthError {
+  constructor(type: string) {
+    super(`This ${type} is already linked to a different account`, 'IDENTITY_ALREADY_LINKED', 409);
+  }
+}
+
 export class MissingAccessTokenError extends UserAuthError {
   constructor() {
     super('Missing or invalid Authorization header', 'MISSING_ACCESS_TOKEN', 401);

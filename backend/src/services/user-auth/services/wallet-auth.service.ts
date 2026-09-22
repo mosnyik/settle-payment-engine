@@ -11,9 +11,9 @@ import pool from '../../../lib/mysql';
 import { RowDataPacket } from 'mysql2';
 import { generateSecureToken } from '../../../security/utils/crypto';
 import config from '../../../config';
-import { User } from '../types';
+import { User, UserIdentity } from '../types';
 import { InvalidWalletSignatureError, WalletNonceExpiredError } from '../errors';
-import { findOrCreateUserByIdentity } from './user.service';
+import { findOrCreateUserByIdentity, linkIdentityToUser } from './user.service';
 
 interface WalletNonceRow extends RowDataPacket {
   id: number;
@@ -59,9 +59,13 @@ export async function createNonce(address: string): Promise<{ nonce: string; mes
 }
 
 /**
- * Verify a signed nonce message and resolve/create the associated user account.
+ * Check a signed nonce message and consume it. Shared by login and
+ * account-linking — recovering and validating the signer is the same
+ * operation either way; what differs is what the caller does with the
+ * proven address afterward. Returns the normalized (checksummed, lowercased)
+ * address.
  */
-export async function verifySignature(address: string, signature: string): Promise<User> {
+async function consumeValidSignature(address: string, signature: string): Promise<string> {
   const normalized = normalizeAddress(address);
 
   const [rows] = await pool.query<WalletNonceRow[]>(
@@ -89,5 +93,28 @@ export async function verifySignature(address: string, signature: string): Promi
 
   await pool.query(`UPDATE user_wallet_nonces SET consumed_at = NOW() WHERE id = ?`, [row.id]);
 
+  return normalized;
+}
+
+/**
+ * Verify a signed nonce message and resolve/create the associated user account.
+ */
+export async function verifySignature(address: string, signature: string): Promise<User> {
+  const normalized = await consumeValidSignature(address, signature);
   return findOrCreateUserByIdentity('wallet', normalized, true);
+}
+
+/**
+ * Verify a signed nonce message and link the wallet to an already-authenticated
+ * user's account instead of resolving/creating a separate one. Request the
+ * nonce via the same public POST /v1/users/auth/wallet/nonce — there's no
+ * linking-specific nonce step.
+ */
+export async function verifySignatureForLinking(
+  userId: string,
+  address: string,
+  signature: string
+): Promise<UserIdentity> {
+  const normalized = await consumeValidSignature(address, signature);
+  return linkIdentityToUser(userId, 'wallet', normalized);
 }

@@ -25,7 +25,7 @@ import { bankService } from '../services/bank/bank.service';
 import { sessionManager } from '../services/payment-engine/session/session-manager';
 import { sendPaymentWebhook } from '../services/payment-engine/payment-webhook.service';
 import { lockRate } from '../services/payment-engine/rate';
-import { calculateCharges } from '../services/payment-engine/charges';
+import { calculateCharges, calculateChargesFromCrypto } from '../services/payment-engine/charges';
 
 const router = Router();
 
@@ -265,10 +265,9 @@ router.post(
  * a session, wallet, or any DB record, and needs no payer/receiver, so it
  * can be called before the caller has an end-user session.
  *
- * The percentage "first transaction" fee (see session-manager.ts) requires
- * a known session owner and isn't applied here — this always estimates
- * against the base flat fee tier; the real fee is finalized when the
- * payment is actually created.
+ * Estimates include a 1% conversion fee plus the flat processing fee.
+ * Both fee fields are returned in fiat currency; the crypto total includes both.
+ * Final payment fees are still determined by the payment-creation flow.
  */
 router.post(
   '/estimate',
@@ -283,10 +282,13 @@ router.post(
         });
       }
 
-      const { fiatAmount, fiatCurrency, crypto, network, chargeFrom } = parsed.data;
+      const { fiatAmount, cryptoAmount, fiatCurrency, crypto, network, chargeFrom } = parsed.data;
 
       const rateLock = await lockRate(crypto, fiatCurrency);
-      const charges = calculateCharges(fiatAmount, crypto, rateLock, undefined, chargeFrom, 0);
+      const charges =
+        fiatAmount === undefined && cryptoAmount !== undefined
+          ? calculateChargesFromCrypto(cryptoAmount, crypto, rateLock, undefined, 0.01)
+          : calculateCharges(fiatAmount!, crypto, rateLock, undefined, chargeFrom, 0.01);
 
       return res.json({
         success: true,

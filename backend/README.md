@@ -794,6 +794,140 @@ src/services/payment-engine/
 | USDT | `erc20`, `bep20`, `trc20` |
 | USDC | `erc20`, `bep20` |
 
+## Estimating a Payment
+
+`POST /v1/payments/estimate` gives a sessionless preview of a payment — locks a rate, calculates fees, and returns the crypto amount needed (or the fiat payout, for crypto-first). No session, wallet, or DB record is created, and no HMAC signature is required.
+
+You can estimate either direction:
+- **Fiat-first** — "I want the receiver to get ₦50,000, how much crypto do I send?"
+- **Crypto-first** — "I'm sending 0.5 BTC, how much NGN does the receiver get?"
+
+Provide exactly one of `fiatAmount` or `cryptoAmount` (if both are sent, `fiatAmount` wins). `crypto` and `network` are always required — see [Supported Networks](#supported-networks) above for valid combinations.
+
+### Fiat-first estimate
+
+```http
+POST /v1/payments/estimate
+Content-Type: application/json
+
+{
+  "fiatAmount": 50000,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "chargeFrom": "crypto"
+}
+```
+
+```json
+{
+  "success": true,
+  "estimate": {
+    "cryptoAmount": 33.15,
+    "crypto": "USDT",
+    "network": "trc20",
+    "fiatAmount": 50000,
+    "fiatCurrency": "NGN",
+    "rate": 1538.46,
+    "conversionFee": 325.5,
+    "processingFee": 500,
+    "chargeFrom": "crypto",
+    "expiresAt": "2026-09-22T10:15:00.000Z"
+  }
+}
+```
+
+`chargeFrom` controls who bears the fee, same as payment creation:
+- `"crypto"` (default) — receiver gets the full `fiatAmount`; payer sends extra crypto to cover the fee
+- `"fiat"` — fee is deducted from the fiat payout; payer sends crypto only for `fiatAmount`
+
+### Crypto-first estimate
+
+Send `cryptoAmount` instead of `fiatAmount`. `chargeFrom` cannot be `"fiat"` here — crypto-first estimates always charge from crypto.
+
+```http
+POST /v1/payments/estimate
+Content-Type: application/json
+
+{
+  "cryptoAmount": 0.5,
+  "crypto": "BTC",
+  "network": "bitcoin",
+  "fiatCurrency": "NGN"
+}
+```
+
+```json
+{
+  "success": true,
+  "estimate": {
+    "cryptoAmount": 0.5,
+    "crypto": "BTC",
+    "network": "bitcoin",
+    "fiatAmount": 79800000,
+    "fiatCurrency": "NGN",
+    "rate": 1650.5,
+    "conversionFee": 798,
+    "processingFee": 1500,
+    "chargeFrom": "crypto",
+    "expiresAt": "2026-09-22T10:15:00.000Z"
+  }
+}
+```
+
+### One example per asset
+
+```bash
+# BTC
+curl -s -X POST https://api.2settle.io/v1/payments/estimate \
+  -H "Content-Type: application/json" \
+  -d '{"fiatAmount":50000,"crypto":"BTC","network":"bitcoin"}'
+
+# ETH
+curl -s -X POST https://api.2settle.io/v1/payments/estimate \
+  -H "Content-Type: application/json" \
+  -d '{"fiatAmount":50000,"crypto":"ETH","network":"ethereum"}'
+
+# BNB
+curl -s -X POST https://api.2settle.io/v1/payments/estimate \
+  -H "Content-Type: application/json" \
+  -d '{"fiatAmount":50000,"crypto":"BNB","network":"bsc"}'
+
+# TRX
+curl -s -X POST https://api.2settle.io/v1/payments/estimate \
+  -H "Content-Type: application/json" \
+  -d '{"fiatAmount":50000,"crypto":"TRX","network":"tron"}'
+
+# USDT — network must be erc20, bep20, or trc20 (not "ethereum"/"bsc"/"tron")
+curl -s -X POST https://api.2settle.io/v1/payments/estimate \
+  -H "Content-Type: application/json" \
+  -d '{"fiatAmount":50000,"crypto":"USDT","network":"trc20"}'
+
+# USDC — network must be erc20 or bep20
+curl -s -X POST https://api.2settle.io/v1/payments/estimate \
+  -H "Content-Type: application/json" \
+  -d '{"fiatAmount":50000,"crypto":"USDC","network":"erc20"}'
+
+# Crypto-first example (BTC)
+curl -s -X POST https://api.2settle.io/v1/payments/estimate \
+  -H "Content-Type: application/json" \
+  -d '{"cryptoAmount":0.05,"crypto":"BTC","network":"bitcoin"}'
+```
+
+### Limits and errors
+
+Same limits as payment creation (see Fee Structure above): **min ₦1, max ₦2,000,000** fiat-equivalent. All errors below return HTTP 400 with `code: "INVALID_INPUT"`.
+
+- **Fiat-first** — the limit is checked directly against `fiatAmount`, and the error is denominated in ₦:
+  ```json
+  { "success": false, "error": "Amount exceeds maximum limit. Maximum is ₦2,000,000.", "code": "INVALID_INPUT" }
+  ```
+- **Crypto-first** — the limit is checked against the derived fiat equivalent, but the error is converted back into the crypto you sent, e.g. sending too much BTC:
+  ```json
+  { "success": false, "error": "Amount exceeds maximum limit. Maximum is 1.21212121 BTC.", "code": "INVALID_INPUT" }
+  ```
+  Since ₦2,000,000 is small relative to high-value assets, a few whole BTC will always exceed it — use fractional amounts (e.g. `0.05`) to see a successful estimate instead of the limit error.
+
 ## Rate Engine
 
 The rate engine selects the exchange rate used to lock each payment session. It compares quotes from the internal system rate and any enabled external providers, always choosing the lowest (most conservative) rate.

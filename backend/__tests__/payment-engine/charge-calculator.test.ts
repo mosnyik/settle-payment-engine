@@ -427,3 +427,35 @@ describe('Charge Calculator', () => {
     });
   });
 });
+
+describe('Estimate fee policy: one percent conversion fee', () => {
+  it.each(['USDT', 'BTC', 'ETH', 'BNB', 'TRX'] as const)(
+    'returns conversion and processing fees in naira for %s',
+    (crypto) => {
+      const result = calculateCharges(50000, crypto, createMockRateLock(), undefined, 'crypto', 0.01);
+      expect(result.percentageFiatCharge).toBeCloseTo(500, 8);
+      expect(result.flatFiatCharge).toBe(500);
+      expect(result.fiatCharge).toBeCloseTo(1000, 8);
+      expect(result.netFiatAmount).toBe(50000);
+      const expectedCrypto = crypto === 'USDT' ? 31.88 :
+        roundCryptoAmount(51000 / 1600 / 95000, crypto);
+      expect(result.totalCryptoAmount).toBe(expectedCrypto);
+    }
+  );
+
+  it.each([[100000, 1000, 500], [500000, 5000, 1000], [2000000, 20000, 1500]])(
+    'keeps the tiered processing fee for a naira amount of %s',
+    (amount, conversionFee, processingFee) => {
+      const result = calculateCharges(amount, 'USDT', createMockRateLock(), undefined, 'crypto', 0.01);
+      expect(result.percentageFiatCharge).toBeCloseTo(conversionFee, 8);
+      expect(result.flatFiatCharge).toBe(processingFee);
+    }
+  );
+
+  it('retains server amount limits', () => {
+    for (const amount of [0.5, 2000001]) {
+      expect(() => calculateCharges(amount, 'USDT', createMockRateLock(), undefined, 'crypto', 0.01))
+        .toThrow(InvalidInputError);
+    }
+  });
+});

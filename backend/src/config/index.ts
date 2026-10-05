@@ -247,7 +247,7 @@ export const config = {
 
     sms: {
       enabled: process.env.SMS_OTP_ENABLED === "true",
-      // "generic" (bring-your-own HTTP gateway), "africastalking", or "sendchamp"
+      // "generic" (bring-your-own HTTP gateway), "africastalking", "sendchamp", or "twilio"
       provider: process.env.SMS_PROVIDER || "generic",
       senderId: process.env.SMS_SENDER_ID || "2Settle",
 
@@ -273,6 +273,21 @@ export const config = {
         route: process.env.SENDCHAMP_ROUTE || "dnd",
         baseUrl:
           process.env.SENDCHAMP_BASE_URL || "https://api.sendchamp.com/api/v1",
+      },
+
+      twilio: {
+        accountSid: process.env.TWILIO_ACCOUNT_SID || "",
+        authToken: process.env.TWILIO_AUTH_TOKEN || "",
+        // Optional - an API Key (SK...) + secret is used instead of the
+        // Auth Token when set.
+        apiKeySid: process.env.TWILIO_API_KEY_SID || "",
+        apiKeySecret: process.env.TWILIO_API_KEY_SECRET || "",
+        // Sender: a Messaging Service SID (MG..., preferred) or a single
+        // Twilio number / alphanumeric sender ID in TWILIO_FROM.
+        messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID || "",
+        from: process.env.TWILIO_FROM || "",
+        baseUrl:
+          process.env.TWILIO_BASE_URL || "https://api.twilio.com/2010-04-01",
       },
     },
 

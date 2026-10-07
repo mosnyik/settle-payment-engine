@@ -196,19 +196,21 @@ export class TelegramService {
     error: string
   ): string {
     const bankDisplay = this.escapeHtml(receiver.bankName || receiver.bankCode);
-    const amount = session.fiatAmount.toLocaleString();
+    // Raw number (no thousands separators) so it pastes cleanly into a bank app
+    const amount = String(session.fiatAmount);
     const fiatCurrency = this.escapeHtml(session.fiatCurrency);
     const reference = this.escapeHtml(session.reference);
     const accountNumber = this.escapeHtml(receiver.accountNumber);
     const accountName = this.escapeHtml(receiver.accountName);
 
+    // <code> makes the value tap-to-copy in Telegram
     return `
 <b>Manual Settlement Required</b>
 
 <b>Session:</b> ${reference}
-<b>Amount:</b> ${fiatCurrency} ${amount}
-<b>Account:</b> ${accountNumber}
-<b>Bank:</b> ${bankDisplay}
+<b>Amount:</b> ${fiatCurrency} <code>${amount}</code>
+<b>Account:</b> <code>${accountNumber}</code>
+<b>Bank:</b> <code>${bankDisplay}</code>
 <b>Name:</b> ${accountName}
 
 <b>Error:</b> ${this.escapeHtml(error)}

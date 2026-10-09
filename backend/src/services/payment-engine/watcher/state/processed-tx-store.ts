@@ -54,6 +54,38 @@ export class ProcessedTxStore {
   }
 
   /**
+   * Atomically claim a deposit tx for a session. A tx can fund only one session:
+   * the UNIQUE(tx_hash, action) key makes the first claimer win, even across
+   * concurrent polls. Returns true if this session owns the tx.
+   */
+  async claimDeposit(txHash: string, sessionId: string, chain: WatchableChain): Promise<boolean> {
+    try {
+      await pool.query(
+        `INSERT INTO watcher_processed_transactions
+         (tx_hash, session_id, chain, action, confirmations, processed_at)
+         VALUES (?, ?, ?, 'mark_deposit', NULL, ?)`,
+        [txHash, sessionId, chain, new Date()]
+      );
+      return true;
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'ER_DUP_ENTRY') throw error;
+      const existing = await this.getProcessed(txHash, 'mark_deposit');
+      return existing?.sessionId === sessionId;
+    }
+  }
+
+  /**
+   * Undo a claim made by this session (e.g. marking the deposit failed afterwards).
+   */
+  async releaseDepositClaim(txHash: string, sessionId: string): Promise<void> {
+    await pool.query(
+      `DELETE FROM watcher_processed_transactions
+       WHERE tx_hash = ? AND session_id = ? AND action = 'mark_deposit'`,
+      [txHash, sessionId]
+    );
+  }
+
+  /**
    * Get processed transaction record.
    */
   async getProcessed(

@@ -254,17 +254,42 @@ export class TronAdapter extends ChainAdapter {
           : null;
       const currentBlock = await this.getCurrentBlockNumber();
 
+      const contract = tx.raw_data.contract[0];
+      const contractType = contract?.type;
+
       if (options?.address) {
         const addressTxs = options.tokenAddress
           ? await this.getTrc20Transactions(options.address, options.tokenAddress, currentBlock, 25)
           : await this.getNativeTransactions(options.address, currentBlock, 25);
         const matchedTx = addressTxs.find((candidate) => candidate.txHash === txHash);
         if (matchedTx) return matchedTx;
-        return null;
-      }
 
-      const contract = tx.raw_data.contract[0];
-      const contractType = contract?.type;
+        // The account-history index lags the chain. Fall back to the tx itself,
+        // but only if it is mined and really pays this address (and token).
+        if (!txInfo?.blockNumber) return null;
+
+        const directTx = contractType === 'TriggerSmartContract'
+          ? this.mapTrc20ConfirmedTx(tx, txInfo, currentBlock)
+          : contractType === 'TransferContract'
+            ? this.mapNativeTx(
+                tx,
+                this.hexToBase58(contract?.parameter?.value?.to_address || ''),
+                currentBlock,
+                txInfo.blockNumber,
+                txInfo.blockTimeStamp
+              )
+            : null;
+
+        if (!directTx || directTx.to !== options.address) return null;
+        if (Boolean(options.tokenAddress) !== Boolean(directTx.tokenAddress)) return null;
+        if (
+          options.tokenAddress &&
+          directTx.tokenAddress?.toLowerCase() !== options.tokenAddress.toLowerCase()
+        ) {
+          return null;
+        }
+        return directTx;
+      }
 
       if (contractType === 'TriggerSmartContract') {
         return this.mapTrc20ConfirmedTx(tx, txInfo, currentBlock);
@@ -348,7 +373,9 @@ export class TronAdapter extends ChainAdapter {
     tx: TronGridTx,
     toAddress: string,
     currentBlock: number,
-    confirmedBlockNumber?: number
+    confirmedBlockNumber?: number,
+    /** gettransactionbyid responses have no block_timestamp; pass it from tx info */
+    blockTimestampMs?: number
   ): ChainTransaction {
     const contract = tx.raw_data.contract[0];
     const amountSun = contract?.parameter?.value?.amount || 0;
@@ -369,7 +396,7 @@ export class TronAdapter extends ChainAdapter {
       amountDecimal: amountTrx,
       confirmations,
       blockNumber,
-      blockTime: Math.floor(tx.block_timestamp / 1000),
+      blockTime: Math.floor((tx.block_timestamp ?? blockTimestampMs) / 1000),
       isConfirmed: confirmations >= this.getRequiredConfirmations(),
       status: this.isSuccessfulTx(tx) ? 'confirmed' : 'failed',
     };

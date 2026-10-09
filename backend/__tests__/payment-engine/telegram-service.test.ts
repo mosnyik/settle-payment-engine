@@ -30,9 +30,9 @@ describe('TelegramService', () => {
     );
 
     expect(message).toContain('sess&lt;&amp;&gt;1');
-    expect(message).toContain('NGN&lt;&amp;&gt; <code>12500</code>');
-    expect(message).toContain('<code>012&lt;345&amp;678</code>');
-    expect(message).toContain('<code>Access &amp; Diamond &lt;Bank&gt;</code>');
+    expect(message).toContain('<b>Amount (NGN&lt;&amp;&gt;):</b>\n<pre>12500</pre>');
+    expect(message).toContain('<pre>012&lt;345&amp;678</pre>');
+    expect(message).toContain('<pre>Access &amp; Diamond &lt;Bank&gt;</pre>');
     expect(message).toContain('Ada &amp; Co &lt;Ops&gt;');
     expect(message).toContain('Provider returned &lt;invalid&gt; &amp; retry failed');
     expect(message).not.toContain('Provider returned <invalid> & retry failed');

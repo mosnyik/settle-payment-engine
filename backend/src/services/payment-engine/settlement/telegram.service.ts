@@ -203,14 +203,17 @@ export class TelegramService {
     const accountNumber = this.escapeHtml(receiver.accountNumber);
     const accountName = this.escapeHtml(receiver.accountName);
 
-    // <code> makes the value tap-to-copy in Telegram
+    // <pre> renders each value as a shaded block with a Copy button in Telegram
     return `
 <b>Manual Settlement Required</b>
 
 <b>Session:</b> ${reference}
-<b>Amount:</b> ${fiatCurrency} <code>${amount}</code>
-<b>Account:</b> <code>${accountNumber}</code>
-<b>Bank:</b> <code>${bankDisplay}</code>
+<b>Amount (${fiatCurrency}):</b>
+<pre>${amount}</pre>
+<b>Account:</b>
+<pre>${accountNumber}</pre>
+<b>Bank:</b>
+<pre>${bankDisplay}</pre>
 <b>Name:</b> ${accountName}
 
 <b>Error:</b> ${this.escapeHtml(error)}

@@ -7,7 +7,7 @@
 
 import { EventEmitter } from 'events';
 import { sessionManager, sessionRepository } from '../session';
-import { Network, CryptoCurrency, HDChain } from '../types';
+import { Network, CryptoCurrency, HDChain, DEFAULT_CONFIG } from '../types';
 import { getSweeperService } from '../sweeper';
 import {
   WatcherConfig,
@@ -31,6 +31,7 @@ import {
   TronAdapter,
 } from './adapters';
 import { getProcessedTxStore } from './state';
+import { checkAmountMatch, isWithinPaymentWindow, rankDepositCandidates } from './deposit-matching';
 import * as walletService from '../../wallet-api/wallet.service';
 import { sendWebhook } from '../../wallet-api/webhook.service';
 import { getApiKeyById, getWebhookConfig } from '../../../security/services/apiKey.service';
@@ -319,6 +320,8 @@ export class DepositWatcher extends EventEmitter {
     fundingWalletIndex?: number;
     toAddress?: string;
     expiresAt: Date;
+    /** Defaults to expiresAt minus the session TTL, i.e. when the address was assigned */
+    watchFrom?: Date;
     confirmationThresholds?: Partial<Record<string, number>>;
     status?: 'pending' | 'confirming';
     txHash?: string;
@@ -344,6 +347,9 @@ export class DepositWatcher extends EventEmitter {
       txHash: params.txHash,
       receivedAmount: params.receivedAmount,
       expiresAt: params.expiresAt,
+      watchFrom:
+        params.watchFrom ??
+        new Date(params.expiresAt.getTime() - DEFAULT_CONFIG.sessionTtlMinutes * 60 * 1000),
     };
 
     this.watchSession(session);
@@ -722,16 +728,15 @@ export class DepositWatcher extends EventEmitter {
       limit: 10,
     });
 
-    for (const tx of transactions) {
-      // Skip if already processed
-      if (await txStore.isProcessed(tx.txHash, 'mark_deposit')) {
-        continue;
-      }
+    const candidates = rankDepositCandidates(
+      await this.getEligibleDeposits(session, transactions),
+      session.expectedAmount,
+      this.config.amountTolerance
+    );
 
-      // Validate transaction
-      const validation = this.validateTransaction(tx, session);
-      if (!validation.valid) {
-        await this.handleInvalidTransaction(tx, session, validation);
+    for (const tx of candidates) {
+      // Claim before marking so the same tx can never fund two sessions
+      if (!(await txStore.claimDeposit(tx.txHash, session.id, session.chain))) {
         continue;
       }
 
@@ -761,14 +766,6 @@ export class DepositWatcher extends EventEmitter {
         await sessionManager.updateConfirmations(session.id, tx.confirmations);
 
         sendPaymentWebhook(session.id, 'payment.confirming').catch(() => {});
-
-        await txStore.markProcessed({
-          txHash: tx.txHash,
-          sessionId: session.id,
-          chain: session.chain,
-          action: 'mark_deposit',
-          processedAt: new Date(),
-        });
 
         // Update session state for confirmation tracking
         const watch = this.activeWatches.get(session.id);
@@ -804,8 +801,41 @@ export class DepositWatcher extends EventEmitter {
         return; // Found a match, stop checking
       } catch (error) {
         console.error(`[DepositWatcher] Error marking deposit:`, error);
+        await txStore.releaseDepositClaim(tx.txHash, session.id).catch(() => {});
       }
     }
+  }
+
+  /**
+   * Transactions to this session's address that could be this session's payment:
+   * valid, mined inside the payment window, and not already claimed by another
+   * session. Invalid in-window txs are reported as security events.
+   */
+  private async getEligibleDeposits(
+    session: WatchedSession,
+    transactions: ChainTransaction[],
+    excludeTxHash?: string
+  ): Promise<ChainTransaction[]> {
+    const txStore = getProcessedTxStore();
+    const eligible: ChainTransaction[] = [];
+
+    for (const tx of transactions) {
+      if (tx.txHash === excludeTxHash) continue;
+      if (!isWithinPaymentWindow(tx, session.watchFrom)) continue;
+
+      const claim = await txStore.getProcessed(tx.txHash, 'mark_deposit');
+      if (claim && claim.sessionId !== session.id) continue;
+
+      const validation = this.validateTransaction(tx, session);
+      if (!validation.valid) {
+        await this.handleInvalidTransaction(tx, session, validation);
+        continue;
+      }
+
+      eligible.push(tx);
+    }
+
+    return eligible;
   }
 
   /**
@@ -1000,25 +1030,34 @@ export class DepositWatcher extends EventEmitter {
   }
 
   /**
-   * If the originally detected tx can no longer be fetched, look for a newer
-   * valid payment to the same deposit address. This primarily covers Bitcoin
-   * RBF replacements, but it also helps with explorer inconsistencies.
+   * If the originally detected tx can no longer be fetched, look for the payment
+   * that replaced it. Only Bitcoin RBF can legitimately swap a session's funding
+   * tx; on other chains a missing tx is explorer/index lag, and falling back to
+   * "another recent tx" would credit this session with someone else's payment.
    */
   private async findReplacementDeposit(
     session: WatchedSession,
     adapter: ChainAdapter
   ): Promise<ChainTransaction | null> {
+    if (session.chain !== 'bitcoin') return null;
+
+    const txStore = getProcessedTxStore();
     const tokenAddress = this.getTokenAddress(session.network, session.cryptoCurrency);
     const transactions = await adapter.getTransactions(session.depositAddress, {
       tokenAddress,
       limit: 10,
     });
 
-    for (const candidate of transactions) {
-      if (candidate.txHash === session.txHash) continue;
+    const candidates = rankDepositCandidates(
+      await this.getEligibleDeposits(session, transactions, session.txHash),
+      session.expectedAmount,
+      this.config.amountTolerance
+    );
 
-      const validation = this.validateTransaction(candidate, session);
-      if (!validation.valid) continue;
+    for (const candidate of candidates) {
+      if (!(await txStore.claimDeposit(candidate.txHash, session.id, session.chain))) {
+        continue;
+      }
 
       const amountMatch = this.checkAmountMatch(candidate.amountDecimal, session.expectedAmount);
 
@@ -1153,14 +1192,7 @@ export class DepositWatcher extends EventEmitter {
    * Check if received amount matches expected amount within tolerance.
    */
   private checkAmountMatch(received: number, expected: number): AmountMatchResult {
-    const tolerance = this.config.amountTolerance;
-    const diff = received - expected;
-    const percentDiff = Math.abs(diff) / expected;
-
-    if (diff === 0) return 'exact';
-    if (diff > 0) return 'overpaid';
-    if (percentDiff <= tolerance) return 'within_tolerance';
-    return 'underpaid';
+    return checkAmountMatch(received, expected, this.config.amountTolerance);
   }
 
   /**

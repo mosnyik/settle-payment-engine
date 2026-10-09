@@ -127,6 +127,8 @@ export interface WatchedSession {
   txHash?: string;
   receivedAmount?: number;
   expiresAt: Date;
+  /** Start of the payment window — deposits mined before this belong to someone else */
+  watchFrom: Date;
 }
 
 /** HDWaaS wallet being watched for deposits */

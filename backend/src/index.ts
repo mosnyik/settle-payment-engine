@@ -4,6 +4,7 @@ import timeout from 'connect-timeout';
 import config from './config';
 import routes from './routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { captureRawBody } from './middleware/rawBody';
 import {
   securityHeaders,
   requestContext,
@@ -52,8 +53,9 @@ app.use(cors({
   credentials: true,
 }));
 
-// 4. Body parsing
-app.use(express.json());
+// 4. Body parsing — keep the raw bytes too: provider webhook signatures
+// (Hyparrow) are computed over the exact body, not re-serialized JSON
+app.use(express.json({ verify: captureRawBody }));
 app.use(express.urlencoded({ extended: true }));
 
 // 5. Audit logging (captures request details, hooks into response)

@@ -15,36 +15,22 @@ export interface SettlementRequest {
   narration?: string;
 }
 
-export interface MongoroTransferRequest {
-  accountNumber: string;
-  accountBank: string; // Bank code
-  bankName: string;
-  amount: number;
-  saveBeneficiary: boolean;
-  accountName: string;
-  narration: string;
-  currency: string;
-  callbackUrl: string;
-  debitCurrency: string;
-  pin: string;
+/**
+ * Provider-agnostic settlement outcome, translated from each provider's webhook.
+ * - success:  beneficiary credited
+ * - failed:   declined downstream, money not yet returned (may still resolve)
+ * - reversed: money returned to the provider wallet — final
+ */
+export interface SettlementProviderUpdate {
+  reference: string;
+  status: 'success' | 'failed' | 'reversed';
+  message?: string;
+  fee?: number; // Fiat (naira), not minor units
+  refunded?: number; // Principal returned to the provider wallet, in fiat — credited back to our ledger
+  payload: Record<string, unknown>;
 }
 
-export interface MongoroTransferResponse {
-  success: boolean;
-  message: string;
-  data?: {
-    reference?: string;
-    status?: string;
-    amount?: number;
-    fee?: number;
-    narration?: string;
-    destinationAccountName?: string;
-    destinationBankName?: string;
-    destinationAccountNumber?: string;
-    sessionId?: string;
-  };
-}
-
+/** Legacy: kept only for Mongoro callbacks on transfers in flight at cutover. */
 export interface MongoroWebhookPayload {
   reference: string;
   status: 'success' | 'failed' | 'reversed' | 'pending';
@@ -96,17 +82,61 @@ export interface TelegramAlertConfig {
   webhookSecret: string;
 }
 
-export interface MongoroConfig {
+export interface HyparrowConfig {
   baseUrl: string;
-  token: string;
-  transferPin: string;
-  callbackUrl: string;
-  webhookIps: string[];
+  apiKey: string;
+  apiSecret: string;
+  webhookSecret: string;
+  senderPhone: string;
+  senderEmail: string;
+  senderLastname: string;
+  senderOthernames: string;
+  timeoutMs: number;
 }
 
 export interface SettlementConfig {
   enabled: boolean;
-  provider: 'mongoro';
-  mongoro: MongoroConfig;
+  provider: 'hyparrow';
+  hyparrow: HyparrowConfig;
+  mongoro: { webhookIps: string[] };
   telegram: TelegramAlertConfig;
+}
+
+// =============================================================================
+// HYPARROW
+// =============================================================================
+
+/** Body of POST /money-transfer/send. Amount is kobo as a string. */
+export interface HyparrowSendRequest {
+  amount: string;
+  recipientAccount: string;
+  recipientBankCode: string;
+  recipientName: string;
+  senderPhone: string;
+  senderEmail: string;
+  senderLastname: string;
+  senderOthernames: string;
+  narration?: string;
+  clientReference: string;
+}
+
+/** Envelope shared by Hyparrow transfer webhooks (transfer.settled / failed / reversed). */
+export interface HyparrowTransferWebhook {
+  event: string;
+  timestamp: number | string;
+  data: {
+    transferCode?: string;
+    clientReference?: string;
+    status?: string;
+    amount?: number; // kobo
+    fee?: number; // kobo
+    reason?: string;
+    totalReturned?: number; // kobo
+    provider?: {
+      transactionResponseCode?: string;
+      transactionRef?: string;
+      responseMessage?: string;
+    };
+    [key: string]: unknown;
+  };
 }

@@ -11,6 +11,11 @@ import { SettlementRequest } from '../types';
 
 export interface SettlementTransferResult {
   success: boolean;
+  /**
+   * The provider could not confirm whether the transfer was submitted. Treated
+   * as in flight (never retried elsewhere) and flagged for a human to check.
+   */
+  uncertain?: boolean;
   reference?: string;
   message: string;
   raw?: Record<string, unknown>;

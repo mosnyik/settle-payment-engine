@@ -11,12 +11,15 @@ import config from '../../../config';
 import { pool } from '../../../lib/mysql';
 import { TelegramService, telegramService, SessionAlertData } from './telegram.service';
 import { SettlementRouter, settlementRouter, SettlementDispatchResult } from './settlement-router';
+import { ProviderBalanceRepository, providerBalanceRepository } from './provider-balance.repository';
 import { sendPaymentWebhook } from '../payment-webhook.service';
 import {
   SettlementConfig,
   SettlementAttempt,
   CreateSettlementAttemptData,
+  SettlementProviderUpdate,
   MongoroWebhookPayload,
+  HyparrowTransferWebhook,
 } from './types';
 import { getApiKeyById } from '../../../security/services/apiKey.service';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
@@ -66,15 +69,18 @@ export class SettlementService {
   private readonly config: SettlementConfig;
   private readonly router: SettlementRouter;
   private readonly telegram: TelegramService;
+  private readonly balances: ProviderBalanceRepository;
 
   constructor(
     settlementConfig: SettlementConfig = config.settlement,
     router: SettlementRouter = settlementRouter,
-    telegramSvc: TelegramService = telegramService
+    telegramSvc: TelegramService = telegramService,
+    balances: ProviderBalanceRepository = providerBalanceRepository
   ) {
     this.config = settlementConfig;
     this.router = router;
     this.telegram = telegramSvc;
+    this.balances = balances;
   }
 
   /**
@@ -219,6 +225,15 @@ export class SettlementService {
     if (result.success && result.reference) {
       await this.updateSessionSettlement(sessionId, result.reference, provider);
       console.log(`[Settlement] Initiated for ${session.reference} via ${provider}, ref: ${result.reference}`);
+
+      if (result.uncertain) {
+        // The transfer may already be on its way — a manual payout now could pay twice
+        await this.telegram.sendSettlementReviewAlert(
+          { reference: session.reference, fiatAmount: payoutFiatAmount, fiatCurrency: session.fiat_currency },
+          result.reference,
+          `${provider}: ${result.message}`
+        );
+      }
     } else {
       await this.handleSettlementFailure(session, receiver, result.message);
     }
@@ -324,7 +339,7 @@ export class SettlementService {
       // Telegram succeeded - stay in settling, admin will handle
       console.log(`[Settlement] Telegram alert sent for ${session.reference}, awaiting manual settlement`);
     } else {
-      // Both Mongoro AND Telegram failed - mark as failed
+      // Both the provider AND Telegram failed - mark as failed
       console.error(`[Settlement] Settlement and Telegram alert both failed for ${session.reference}, marking as failed`);
       await this.updateSessionStatus(session.id, 'failed');
       sendPaymentWebhook(session.id, 'payment.failed').catch(() => {});
@@ -332,10 +347,72 @@ export class SettlementService {
   }
 
   /**
-   * Handle Mongoro webhook callback
+   * Handle Hyparrow transfer webhook (transfer.settled / transfer.failed / transfer.reversed)
+   */
+  async handleHyparrowWebhook(payload: HyparrowTransferWebhook): Promise<void> {
+    const { event, data } = payload;
+    const reference = data?.clientReference;
+    if (!reference) {
+      console.warn(`[Settlement] Hyparrow ${event} without clientReference, ignoring`);
+      return;
+    }
+
+    const responseCode = data.provider?.transactionResponseCode;
+    const raw = payload as unknown as Record<string, unknown>;
+
+    switch (event) {
+      case 'transfer.settled':
+        return this.handleProviderUpdate({
+          reference,
+          status: 'success',
+          fee: typeof data.fee === 'number' ? data.fee / 100 : undefined,
+          payload: raw,
+        });
+      case 'transfer.failed':
+        return this.handleProviderUpdate({
+          reference,
+          status: 'failed',
+          message: `${data.provider?.responseMessage || 'Declined'}${responseCode ? ` (code ${responseCode})` : ''}`,
+          payload: raw,
+        });
+      case 'transfer.reversed': {
+        const principal = typeof data.principalReturned === 'number' ? data.principalReturned : data.amount;
+        return this.handleProviderUpdate({
+          reference,
+          status: 'reversed',
+          message: `Reversed: ${data.reason || 'unknown reason'}`,
+          refunded: typeof principal === 'number' ? principal / 100 : undefined,
+          payload: raw,
+        });
+      }
+      default:
+        // Other account events (wallet.funded, test.webhook, ...) don't affect settlement
+        console.log(`[Settlement] Ignoring Hyparrow event ${event}`);
+    }
+  }
+
+  /**
+   * Handle Mongoro webhook callback.
+   * Mongoro is no longer used for new payouts; this only resolves transfers in flight at cutover.
    */
   async handleWebhook(payload: MongoroWebhookPayload): Promise<void> {
-    const { reference, status, message } = payload;
+    if (payload.status === 'pending') return;
+
+    await this.handleProviderUpdate({
+      reference: payload.reference,
+      // Mongoro's "failed" was always treated as final
+      status: payload.status === 'success' ? 'success' : 'reversed',
+      message: payload.message || `Transfer ${payload.status}`,
+      fee: payload.fee,
+      payload: payload as unknown as Record<string, unknown>,
+    });
+  }
+
+  /**
+   * Apply a provider's settlement outcome to the session
+   */
+  async handleProviderUpdate(update: SettlementProviderUpdate): Promise<void> {
+    const { reference, status, message } = update;
 
     if (!reference) {
       console.error('[Settlement] Webhook missing reference');
@@ -355,12 +432,39 @@ export class SettlementService {
       return;
     }
 
-    // Update settlement attempt
+    const sessionData: SessionAlertData = {
+      reference: session.reference,
+      fiatAmount: this.getPayoutFiatAmount(session),
+      fiatCurrency: session.fiat_currency,
+    };
+
     const attempt = await this.getSettlementAttemptByReference(reference);
+
+    if (status === 'failed') {
+      // Declined, but the money has not come back yet and the decline can still
+      // resolve to a credit — the session stays settling until settled/reversed.
+      if (attempt?.status === 'failed') return; // duplicate delivery
+
+      if (attempt) {
+        await this.updateSettlementAttempt(attempt.id, {
+          status: 'failed',
+          responsePayload: update.payload,
+          errorMessage: message,
+        });
+      }
+      await this.telegram.sendSettlementReviewAlert(
+        sessionData,
+        reference,
+        `${message || 'Transfer failed'}. Awaiting reversal from the provider.`
+      );
+      console.warn(`[Settlement] Transfer failed for ${session.reference}, awaiting reversal: ${message}`);
+      return;
+    }
+
     if (attempt) {
       await this.updateSettlementAttempt(attempt.id, {
-        status: status === 'success' ? 'success' : status === 'reversed' ? 'reversed' : 'failed',
-        responsePayload: payload as unknown as Record<string, unknown>,
+        status,
+        responsePayload: update.payload,
         errorMessage: status !== 'success' ? message : undefined,
       });
     }
@@ -368,26 +472,24 @@ export class SettlementService {
     // Handle based on status
     if (status === 'success') {
       // Mark session as settled
-      await this.markSessionSettled(session.id, payload.fee);
+      await this.markSessionSettled(session.id, update.fee);
       sendPaymentWebhook(session.id, 'payment.settled').catch(() => {});
       console.log(`[Settlement] Completed for ${session.reference}`);
-    } else if (status === 'reversed' || status === 'failed') {
+    } else {
+      // The money is back in the provider wallet — make it spendable again
+      if (attempt && update.refunded) {
+        await this.balances.credit(attempt.provider, session.fiat_currency, update.refunded);
+      }
+
       // Mark as reversed and send alert
       await this.updateSessionStatus(session.id, 'settlement_reversed');
       sendPaymentWebhook(session.id, 'payment.settlement_reversed').catch(() => {});
 
-      const sessionData = await this.getSession(session.id);
-      if (sessionData) {
-        await this.telegram.sendSettlementReversalAlert(
-          {
-            reference: sessionData.reference,
-            fiatAmount: this.getPayoutFiatAmount(sessionData),
-            fiatCurrency: sessionData.fiat_currency,
-          },
-          reference,
-          message || `Transfer ${status}`
-        );
-      }
+      await this.telegram.sendSettlementReversalAlert(
+        sessionData,
+        reference,
+        message || `Transfer ${status}`
+      );
 
       console.error(`[Settlement] ${status} for ${session.reference}: ${message}`);
     }

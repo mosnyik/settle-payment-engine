@@ -190,6 +190,39 @@ export class TelegramService {
   }
 
   /**
+   * Send alert for a payout whose outcome is not yet known (lost response,
+   * or declined but not yet reversed). Deliberately has no manual-settle
+   * button: paying by hand while the transfer may still land would pay twice.
+   */
+  async sendSettlementReviewAlert(
+    session: SessionAlertData,
+    reference: string,
+    reason: string
+  ): Promise<boolean> {
+    return this.sendMessage(this.formatSettlementReview(session, reference, reason));
+  }
+
+  formatSettlementReview(
+    session: SessionAlertData,
+    reference: string,
+    reason: string
+  ): string {
+    const amount = session.fiatAmount.toLocaleString();
+
+    return `
+<b>Settlement Needs Review</b>
+
+<b>Session:</b> ${this.escapeHtml(session.reference)}
+<b>Amount:</b> ${this.escapeHtml(session.fiatCurrency)} ${amount}
+<b>Reference:</b> <code>${this.escapeHtml(reference)}</code>
+
+<b>Status:</b> ${this.escapeHtml(reason)}
+
+<b>Do NOT pay manually yet.</b> The transfer may still land. Look up the reference in the provider dashboard first.
+    `.trim();
+  }
+
+  /**
    * Format settlement failure message
    */
   formatSettlementFailure(

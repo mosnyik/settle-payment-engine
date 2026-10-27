@@ -1,7 +1,8 @@
 /**
  * Webhook Routes
  *
- * Handles inbound callbacks from settlement providers (Mongoro).
+ * Handles inbound callbacks from settlement providers (Hyparrow, plus legacy
+ * Mongoro for transfers in flight at cutover).
  * These are public endpoints — no HMAC auth, but each provider has its own
  * signature verification.
  */
@@ -9,8 +10,10 @@
 import { Router, Request, Response } from 'express';
 import { settlementService } from '../services/payment-engine/settlement/settlement.service';
 import { telegramService } from '../services/payment-engine/settlement/telegram.service';
-import { MongoroWebhookPayload } from '../services/payment-engine/settlement/types';
+import { verifyHyparrowSignature } from '../services/payment-engine/settlement/hyparrow.service';
+import { HyparrowTransferWebhook, MongoroWebhookPayload } from '../services/payment-engine/settlement/types';
 import { getClientIp, isIpAllowed } from '../security/middleware/ipWhitelist';
+import { RequestWithRawBody } from '../middleware/rawBody';
 import config from '../config';
 
 const router = Router();
@@ -23,7 +26,39 @@ function escapeTelegramHtml(text: string): string {
 }
 
 // =============================================================================
-// POST /v1/webhooks/mongoro
+// POST /v1/webhooks/hyparrow
+// =============================================================================
+router.post('/hyparrow', async (req: Request, res: Response) => {
+  const webhookSecret = config.settlement.hyparrow.webhookSecret;
+  if (!webhookSecret) {
+    console.warn('[Webhook] Hyparrow request rejected because HYPARROW_WEBHOOK_SECRET is not configured');
+    return res.status(503).json({ success: false });
+  }
+
+  const rawBody = (req as RequestWithRawBody).rawBody;
+  const valid = rawBody && verifyHyparrowSignature(
+    rawBody,
+    req.header('x-hyparrow-timestamp'),
+    req.header('x-hyparrow-signature-256'),
+    webhookSecret
+  );
+  if (!valid) {
+    console.warn(`[Webhook] Hyparrow request rejected due to invalid signature from ${getClientIp(req)}`);
+    return res.status(401).json({ success: false });
+  }
+
+  try {
+    await settlementService.handleHyparrowWebhook(req.body as HyparrowTransferWebhook);
+    return res.json({ success: true });
+  } catch (error) {
+    // Non-2xx makes Hyparrow retry (1m, 5m, 30m, 2h, 24h) — handling is idempotent
+    console.error('[Webhook] Hyparrow error:', error);
+    return res.status(500).json({ success: false });
+  }
+});
+
+// =============================================================================
+// POST /v1/webhooks/mongoro (legacy — Mongoro transfers in flight at cutover)
 // =============================================================================
 router.post('/mongoro', async (req: Request, res: Response) => {
   // IP allowlist — only accept calls from known Mongoro server IPs.

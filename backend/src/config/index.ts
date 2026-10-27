@@ -99,14 +99,25 @@ export const config = {
   // Settlement (Fiat Payout) configuration
   settlement: {
     enabled: process.env.SETTLEMENT_ENABLED === "true",
-    provider: "mongoro" as const,
-    mongoro: {
+    provider: "hyparrow" as const,
+    hyparrow: {
       baseUrl:
-        process.env.MONGORO_API_URL ||
-        "https://api-biz-dev.mongoro.com/api/v1/openapi",
-      token: process.env.MONGORO_TOKEN || "",
-      transferPin: process.env.MONGORO_TRANSFERPIN || "",
-      callbackUrl: process.env.MONGORO_CALLBACK_URL || "",
+        process.env.HYPARROW_BASE_URL ||
+        "https://sandbox.hyparrow.cloud/api/v1",
+      apiKey: process.env.HYPARROW_API_KEY || "",
+      apiSecret: process.env.HYPARROW_API_SECRET || "",
+      webhookSecret: process.env.HYPARROW_WEBHOOK_SECRET || "",
+      // Hyparrow requires sender details on every transfer — this is 2Settle
+      // as the business sending the payout, not the crypto payer.
+      senderPhone: process.env.HYPARROW_SENDER_PHONE || "",
+      senderEmail: process.env.HYPARROW_SENDER_EMAIL || "",
+      senderLastname: process.env.HYPARROW_SENDER_LASTNAME || "",
+      senderOthernames: process.env.HYPARROW_SENDER_OTHERNAMES || "",
+      timeoutMs: parseInt(process.env.HYPARROW_TIMEOUT_MS || "30000", 10),
+    },
+    // Mongoro has been replaced by Hyparrow. Only its callback route remains,
+    // so transfers already in flight at cutover can still report their outcome.
+    mongoro: {
       webhookIps: process.env.MONGORO_WEBHOOK_IPS
         ? process.env.MONGORO_WEBHOOK_IPS.split(",").map((ip) => ip.trim())
         : [],

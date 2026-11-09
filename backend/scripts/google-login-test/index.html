@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Google Login Test</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    :root { --bg: #f6f7f9; --card: #fff; --text: #191f32; --muted: #667085; --border: #e4e7ec; --accent: #2d6be4; --ok: #12805c; --err: #c4320a; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    p.sub { color: var(--muted); margin: 0 0 20px; }
+    section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    h2 { font-size: 14px; margin: 0 0 12px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    button { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: #fff; font: inherit; cursor: pointer; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    pre { margin: 0; padding: 12px; background: #0f1422; color: #e6e9ef; border-radius: 6px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 360px; }
+    .status { font-weight: 600; margin-bottom: 8px; }
+    .status.ok { color: var(--ok); } .status.err { color: var(--err); }
+    #gbtn { min-height: 44px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Google Login Test</h1>
+  <p class="sub">Signs in with Google, sends the ID token to <code>POST /v1/users/auth/google</code>, then exercises the returned session.</p>
+
+  <section>
+    <h2>1. Client ID</h2>
+    <label for="clientId">OAuth Web client ID (must be in the server's GOOGLE_CLIENT_ID)</label>
+    <input id="clientId" placeholder="1234-abc.apps.googleusercontent.com" />
+    <div class="row"><button id="loadBtn">Load Google button</button></div>
+  </section>
+
+  <section>
+    <h2>2. Sign in</h2>
+    <div id="gbtn"></div>
+    <div class="row">
+      <button id="badTokenBtn">Send invalid token</button>
+      <button id="resendBtn" disabled>Re-send last ID token</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Or: phone code (WhatsApp / SMS)</h2>
+    <label for="phone">Phone with country code</label>
+    <input id="phone" placeholder="+2348012345678" />
+    <div class="row">
+      <button class="primary" id="waBtn">Send via WhatsApp</button>
+      <button id="smsBtn">Send via SMS</button>
+    </div>
+    <label for="otpCode" style="margin-top:12px">Code</label>
+    <input id="otpCode" inputmode="numeric" placeholder="123456" />
+    <div class="row"><button id="verifyBtn">Verify code</button></div>
+  </section>
+
+  <section>
+    <h2>3. Session</h2>
+    <div class="row" style="margin-top:0">
+      <button id="meBtn" disabled>GET /users/me</button>
+      <button id="refreshBtn" disabled>POST /auth/refresh</button>
+      <button id="logoutBtn" disabled>POST /auth/logout</button>
+      <button id="logoutAllBtn" disabled>POST /auth/logout-all</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>ID token claims</h2>
+    <pre id="claims">—</pre>
+  </section>
+
+  <section>
+    <h2>Last response</h2>
+    <div id="status" class="status"></div>
+    <pre id="out">—</pre>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const state = { idToken: null, accessToken: null, refreshToken: null };
+
+  function decodeJwt(token) {
+    try {
+      const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      return JSON.parse(decodeURIComponent(escape(atob(part))));
+    } catch { return null; }
+  }
+
+  function syncButtons() {
+    $('resendBtn').disabled = !state.idToken;
+    $('meBtn').disabled = !state.accessToken;
+    $('logoutAllBtn').disabled = !state.accessToken;
+    $('refreshBtn').disabled = !state.refreshToken;
+    $('logoutBtn').disabled = !state.refreshToken;
+  }
+
+  async function call(method, path, body, auth) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (auth && state.accessToken) headers.Authorization = `Bearer ${state.accessToken}`;
+    const started = performance.now();
+    let res, json;
+    try {
+      res = await fetch(`/v1${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
+      json = await res.json().catch(() => null);
+    } catch (err) {
+      $('status').className = 'status err';
+      $('status').textContent = `${method} ${path} → network error`;
+      $('out').textContent = String(err);
+      return null;
+    }
+    const ms = Math.round(performance.now() - started);
+    $('status').className = `status ${res.ok ? 'ok' : 'err'}`;
+    $('status').textContent = `${method} /v1${path} → ${res.status} (${ms}ms)`;
+    $('out').textContent = JSON.stringify(json, null, 2);
+    return res.ok ? json : null;
+  }
+
+  function takeSession(json) {
+    const data = json && json.data;
+    if (!data) return;
+    if (data.accessToken) state.accessToken = data.accessToken;
+    if (data.refreshToken) state.refreshToken = data.refreshToken;
+    syncButtons();
+  }
+
+  async function loginWithIdToken(idToken) {
+    $('claims').textContent = JSON.stringify(decodeJwt(idToken), null, 2) || '(not a JWT)';
+    takeSession(await call('POST', '/users/auth/google', { idToken }));
+  }
+
+  function loadGoogle() {
+    const clientId = $('clientId').value.trim();
+    if (!clientId) return alert('Enter a client ID first');
+    if (!window.google || !google.accounts) return alert('Google script has not loaded yet - try again in a second');
+    try { localStorage.setItem('googleTestClientId', clientId); } catch {}
+    google.accounts.id.initialize({
+      client_id: clientId,
+      callback: ({ credential }) => {
+        state.idToken = credential;
+        syncButtons();
+        loginWithIdToken(credential);
+      },
+    });
+    $('gbtn').innerHTML = '';
+    google.accounts.id.renderButton($('gbtn'), { theme: 'outline', size: 'large', text: 'signin_with' });
+  }
+
+  $('loadBtn').onclick = loadGoogle;
+  $('badTokenBtn').onclick = () => loginWithIdToken('not.a.real-token');
+  $('resendBtn').onclick = () => loginWithIdToken(state.idToken);
+  const requestCode = (via) =>
+    call('POST', '/users/auth/otp/request', { channel: 'phone', identifier: $('phone').value.trim(), via });
+  $('waBtn').onclick = () => requestCode('whatsapp');
+  $('smsBtn').onclick = () => requestCode('sms');
+  $('verifyBtn').onclick = async () => takeSession(await call('POST', '/users/auth/otp/verify', {
+    channel: 'phone', identifier: $('phone').value.trim(), code: $('otpCode').value.trim(),
+  }));
+  $('meBtn').onclick = () => call('GET', '/users/me', null, true);
+  $('refreshBtn').onclick = async () => takeSession(await call('POST', '/users/auth/refresh', { refreshToken: state.refreshToken }));
+  $('logoutBtn').onclick = async () => {
+    if (await call('POST', '/users/auth/logout', { refreshToken: state.refreshToken })) {
+      state.refreshToken = null; syncButtons();
+    }
+  };
+  $('logoutAllBtn').onclick = async () => {
+    if (await call('POST', '/users/auth/logout-all', {}, true)) {
+      state.refreshToken = null; syncButtons();
+    }
+  };
+
+  // Prefill from the server's .env, falling back to whatever was used last
+  window.addEventListener('load', async () => {
+    let saved = null;
+    try { saved = localStorage.getItem('googleTestClientId'); } catch {}
+    const cfg = await fetch('/config.json').then((r) => r.json()).catch(() => ({}));
+    $('clientId').value = cfg.clientId || saved || '';
+    if ($('clientId').value) loadGoogle();
+  });
+</script>
+</body>
+</html>

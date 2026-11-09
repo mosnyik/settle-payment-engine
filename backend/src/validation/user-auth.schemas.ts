@@ -22,7 +22,14 @@ function refineIdentifier(data: { channel: 'email' | 'phone'; identifier: string
 export const otpRequestSchema = z.object({
   channel: z.enum(['email', 'phone']),
   identifier: z.string().min(1),
-}).superRefine(refineIdentifier);
+  // Phone only - how the code is delivered (defaults to SMS)
+  via: z.enum(['sms', 'whatsapp']).optional(),
+}).superRefine((data, ctx) => {
+  refineIdentifier(data, ctx);
+  if (data.via && data.channel !== 'phone') {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: '"via" is only supported for the phone channel', path: ['via'] });
+  }
+});
 
 export const otpVerifySchema = z.object({
   channel: z.enum(['email', 'phone']),

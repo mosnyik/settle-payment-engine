@@ -6,6 +6,8 @@
 export type UserStatus = 'active' | 'suspended';
 export type IdentityType = 'email' | 'phone' | 'wallet' | 'google';
 export type OtpChannel = 'email' | 'phone';
+// How a code physically reaches the user - 'phone' codes go by SMS or WhatsApp
+export type OtpDelivery = 'email' | 'sms' | 'whatsapp';
 
 export interface User {
   id: string;

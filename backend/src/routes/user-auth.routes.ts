@@ -56,8 +56,8 @@ async function respondWithSession(user: User, req: Request, res: Response): Prom
 
 router.post('/otp/request', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { channel, identifier } = otpRequestSchema.parse(req.body);
-    const result = await requestOtp(channel, identifier, getClientIp(req));
+    const { channel, identifier, via } = otpRequestSchema.parse(req.body);
+    const result = await requestOtp(channel, identifier, getClientIp(req), via);
     sendJson(res, { success: true, data: result });
   } catch (err) {
     next(err);

@@ -107,7 +107,14 @@ const PORT = config.port;
 
 app.listen(PORT, async () => {
   console.log(`Payment Engine running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/v1/health`);
+  const publicBaseUrl = process.env.PUBLIC_BASE_URL?.trim().replace(/\/+$/, '');
+  if (process.env.NODE_ENV === 'production') {
+    console.log(publicBaseUrl
+      ? `Health check: ${publicBaseUrl}/v1/health`
+      : 'Health check: Set PUBLIC_BASE_URL to display the production health endpoint');
+  } else {
+    console.log(`Health check: http://localhost:${PORT}/v1/health`);
+  }
   console.log(`Security: API Key + HMAC authentication enabled`);
 
   // Initialize HD Wallet if enabled

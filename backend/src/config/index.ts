@@ -302,6 +302,20 @@ export const config = {
       },
     },
 
+    // WhatsApp OTP via Meta's Cloud API directly (no BSP). Business-initiated,
+    // so it uses an approved Authentication template - billed per message by Meta.
+    whatsapp: {
+      enabled: process.env.WHATSAPP_OTP_ENABLED === "true",
+      phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
+      // System User token with whatsapp_business_messaging
+      accessToken: process.env.WHATSAPP_ACCESS_TOKEN || "",
+      templateName: process.env.WHATSAPP_OTP_TEMPLATE_NAME || "login_code",
+      templateLanguage: process.env.WHATSAPP_OTP_TEMPLATE_LANG || "en",
+      graphVersion: process.env.WHATSAPP_GRAPH_VERSION || "v21.0",
+      baseUrl:
+        process.env.WHATSAPP_GRAPH_BASE_URL || "https://graph.facebook.com",
+    },
+
     google: {
       // Comma-separated for multi-platform support (web/iOS/Android each get
       // their own OAuth client ID from Google, but all issue tokens your

@@ -9,13 +9,14 @@ import pool from '../../../lib/mysql';
 import { RowDataPacket } from 'mysql2';
 import { sha256 } from '../../../security/utils/crypto';
 import config from '../../../config';
-import { OtpChannel, User } from '../types';
+import { OtpChannel, OtpDelivery, User } from '../types';
 import { InvalidOtpError, OtpRateLimitedError } from '../errors';
-import { getOtpProvider } from '../otp/providers';
+import { getOtpProvider, resolveOtpDelivery } from '../otp/providers';
 import { findOrCreateUserByIdentity } from './user.service';
 
 interface OtpCodeRow extends RowDataPacket {
   id: number;
+  delivery_method: OtpDelivery | null;
   code_hash: string;
   attempts: number;
   consumed_at: Date | null;
@@ -30,16 +31,30 @@ function generateCode(length: number): string {
 }
 
 /**
+ * Whether a new code may be sent despite the resend cooldown. The one
+ * exception is falling back from WhatsApp to SMS: a number that isn't on
+ * WhatsApp is still accepted by Meta, so the user would otherwise wait out
+ * the cooldown for a message that never arrives. Only that direction is
+ * allowed, so at most two messages go out per cooldown window.
+ */
+export function canBypassCooldown(previous: OtpDelivery | null, next: OtpDelivery): boolean {
+  return previous === 'whatsapp' && next === 'sms';
+}
+
+/**
  * Request a login code for an email/phone identifier. Enforces a resend
  * cooldown so a single identifier can't be used to spam the delivery
- * provider or run up SMS costs.
+ * provider or run up SMS/WhatsApp costs. Phone codes go by SMS unless
+ * `via: 'whatsapp'` - both resolve to the same 'phone' identity.
  */
 export async function requestOtp(
   channel: OtpChannel,
   identifier: string,
-  ipAddress?: string
-): Promise<{ expiresInSec: number }> {
+  ipAddress?: string,
+  via?: 'sms' | 'whatsapp'
+): Promise<{ expiresInSec: number; delivery: OtpDelivery }> {
   const { otp } = config.auth;
+  const delivery = resolveOtpDelivery(channel, via);
 
   const [recentRows] = await pool.query<OtpCodeRow[]>(
     `SELECT * FROM user_otp_codes
@@ -49,7 +64,7 @@ export async function requestOtp(
   );
 
   const recent = recentRows[0];
-  if (recent) {
+  if (recent && !canBypassCooldown(recent.delivery_method, delivery)) {
     const elapsedSec = (Date.now() - recent.created_at.getTime()) / 1000;
     if (elapsedSec < otp.resendCooldownSec) {
       throw new OtpRateLimitedError(Math.ceil(otp.resendCooldownSec - elapsedSec));
@@ -60,14 +75,14 @@ export async function requestOtp(
   const expiresAt = new Date(Date.now() + otp.expiresInSec * 1000);
 
   await pool.query(
-    `INSERT INTO user_otp_codes (channel, identifier, code_hash, expires_at, ip_address)
-     VALUES (?, ?, ?, ?, ?)`,
-    [channel, identifier, sha256(code), expiresAt, ipAddress || null]
+    `INSERT INTO user_otp_codes (channel, delivery_method, identifier, code_hash, expires_at, ip_address)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [channel, delivery, identifier, sha256(code), expiresAt, ipAddress || null]
   );
 
-  await getOtpProvider(channel).send(identifier, code);
+  await getOtpProvider(delivery).send(identifier, code);
 
-  return { expiresInSec: otp.expiresInSec };
+  return { expiresInSec: otp.expiresInSec, delivery };
 }
 
 /**

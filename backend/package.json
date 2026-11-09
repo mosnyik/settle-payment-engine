@@ -20,6 +20,7 @@
     "update:gift-fields-by-amount": "node scripts/update-gift-fields-by-amount.js",
     "lint": "eslint src --ext .ts",
     "test": "vitest",
+    "test:google-login": "node scripts/google-login-test/server.js",
     "test:run": "vitest run",
     "coverage": "vitest run --coverage"
   },

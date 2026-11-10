@@ -5,6 +5,10 @@ import path from "path";
 // Works from both src/ (ts-node) and dist/ (compiled)
 dotenv.config({ path: path.join(__dirname, "../../../.env") });
 
+export function parseRateAlertRecipients(value: string): string[] {
+  return [...new Set(value.split(',').map((email) => email.trim()).filter(Boolean))];
+}
+
 export const config = {
   port: parseInt(process.env.PORT || "3500", 10),
 
@@ -142,6 +146,16 @@ export const config = {
   },
 
   // Rate Engine configuration
+  rateAlerts: {
+    enabled: process.env.RATE_ALERT_EMAIL_ENABLED === 'true',
+    recipients: parseRateAlertRecipients(process.env.RATE_ALERT_EMAIL_TO || ''),
+    from: process.env.RATE_ALERT_EMAIL_FROM || process.env.EMAIL_OTP_FROM || '',
+    staleAfterMinutes: Number(process.env.RATE_ALERT_STALE_AFTER_MINUTES || '45'),
+    checkIntervalSeconds: Number(process.env.RATE_ALERT_CHECK_INTERVAL_SECONDS || '60'),
+    cooldownMinutes: Number(process.env.RATE_ALERT_COOLDOWN_MINUTES || '60'),
+    stateDirectory: process.env.RATE_ALERT_STATE_DIRECTORY || path.resolve(process.cwd(), 'logs/rate-alerts'),
+  },
+
   rateEngine: {
     // How often the background job fetches fresh quotes from external providers (ms)
     fetchIntervalMs: parseInt(process.env.RATE_FETCH_INTERVAL_MS || '30000', 10),

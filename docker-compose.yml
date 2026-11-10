@@ -147,12 +147,53 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME:-2settle_db}
       - RATE_ROW_ID=${RATE_ROW_ID:-1}
+      - RATE_ALERT_EMAIL_ENABLED=${RATE_ALERT_EMAIL_ENABLED:-false}
+      - RATE_ALERT_EMAIL_TO=${RATE_ALERT_EMAIL_TO:-}
+      - RATE_ALERT_EMAIL_FROM=${RATE_ALERT_EMAIL_FROM:-}
+      - RATE_ALERT_STALE_AFTER_MINUTES=${RATE_ALERT_STALE_AFTER_MINUTES:-45}
+      - RATE_ALERT_CHECK_INTERVAL_SECONDS=${RATE_ALERT_CHECK_INTERVAL_SECONDS:-60}
+      - RATE_ALERT_COOLDOWN_MINUTES=${RATE_ALERT_COOLDOWN_MINUTES:-60}
+      - RATE_ALERT_STATE_DIRECTORY=/app/logs/rate-alerts
     command: >
       /bin/sh -c "mkdir -p /app/logs &&
       while true; do
         node dist/scripts/run-rate-update.js >> /app/logs/rate-update.log 2>&1;
         sleep 1200;
       done"
+    healthcheck:
+      disable: true
+    volumes:
+      - ./backend/logs:/app/logs
+    networks:
+      - payment-network
+
+  rate-monitor:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: payment-rate-monitor
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=${DB_HOST:-mysql}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_NAME=${DB_NAME:-2settle_db}
+      - RATE_ROW_ID=${RATE_ROW_ID:-1}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - RATE_ALERT_EMAIL_ENABLED=${RATE_ALERT_EMAIL_ENABLED:-false}
+      - RATE_ALERT_EMAIL_TO=${RATE_ALERT_EMAIL_TO:-}
+      - RATE_ALERT_EMAIL_FROM=${RATE_ALERT_EMAIL_FROM:-}
+      - RATE_ALERT_STALE_AFTER_MINUTES=${RATE_ALERT_STALE_AFTER_MINUTES:-45}
+      - RATE_ALERT_CHECK_INTERVAL_SECONDS=${RATE_ALERT_CHECK_INTERVAL_SECONDS:-60}
+      - RATE_ALERT_COOLDOWN_MINUTES=${RATE_ALERT_COOLDOWN_MINUTES:-60}
+      - RATE_ALERT_STATE_DIRECTORY=/app/logs/rate-alerts
+    command: >
+      /bin/sh -c "if [ \"$$RATE_ALERT_EMAIL_ENABLED\" = \"true\" ]; then
+      exec node dist/scripts/run-rate-monitor.js;
+      else echo '[RateMonitor] Email alerts disabled'; exec tail -f /dev/null; fi"
     healthcheck:
       disable: true
     volumes:

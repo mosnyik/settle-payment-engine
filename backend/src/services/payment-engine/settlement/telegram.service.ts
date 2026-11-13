@@ -32,10 +32,16 @@ interface TelegramInlineKeyboardMarkup {
 
 export class TelegramService {
   private readonly config: TelegramAlertConfig;
+  private readonly chatIds: string[];
   private readonly baseUrl = 'https://api.telegram.org/bot';
 
   constructor(telegramConfig: TelegramAlertConfig = config.settlement.telegram) {
     this.config = telegramConfig;
+    this.chatIds = [...new Set(telegramConfig.chatId.split(',').map((id) => id.trim()).filter(Boolean))];
+  }
+
+  isAllowedChat(chatId: string | number): boolean {
+    return this.chatIds.includes(String(chatId));
   }
 
   /**
@@ -45,12 +51,12 @@ export class TelegramService {
     return (
       this.config.enabled &&
       Boolean(this.config.botToken) &&
-      Boolean(this.config.chatId)
+      this.chatIds.length > 0
     );
   }
 
   /**
-   * Send a message to the configured Telegram chat
+   * Send to every configured chat. Returns true only if all deliveries succeed.
    */
   async sendMessage(message: string, replyMarkup?: TelegramInlineKeyboardMarkup): Promise<boolean> {
     if (!this.isEnabled()) {
@@ -58,6 +64,11 @@ export class TelegramService {
       return false;
     }
 
+    const results = await Promise.all(this.chatIds.map((chatId) => this.sendToChat(chatId, message, replyMarkup)));
+    return results.every(Boolean);
+  }
+
+  private async sendToChat(chatId: string, message: string, replyMarkup?: TelegramInlineKeyboardMarkup): Promise<boolean> {
     try {
       const url = `${this.baseUrl}${this.config.botToken}/sendMessage`;
 
@@ -67,7 +78,7 @@ export class TelegramService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          chat_id: this.config.chatId,
+          chat_id: chatId,
           text: message,
           parse_mode: 'HTML',
           ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
@@ -76,13 +87,13 @@ export class TelegramService {
 
       if (!response.ok) {
         const error = await response.text();
-        console.error('[Telegram] Failed to send message:', error);
+        console.error(`[Telegram] Failed to send message to ${chatId}:`, error);
         return false;
       }
 
       return true;
     } catch (error) {
-      console.error('[Telegram] Error sending message:', error);
+      console.error(`[Telegram] Error sending message to ${chatId}:`, error);
       return false;
     }
   }

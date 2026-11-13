@@ -129,6 +129,7 @@ export const config = {
     telegram: {
       enabled: process.env.TELEGRAM_ALERTS_ENABLED === "true",
       botToken: process.env.TELEGRAM_BOT_TOKEN || "",
+      // One or more group/chat IDs, separated by commas.
       chatId: process.env.TELEGRAM_CHAT_ID || "",
       webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || "",
     },

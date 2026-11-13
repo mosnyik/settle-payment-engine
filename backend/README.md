@@ -2,6 +2,16 @@
 
 A standalone crypto-to-fiat payment engine that enables banks, fintechs, and merchants to accept cryptocurrency payments and settle in local fiat currency.
 
+## Telegram alert groups
+
+Set `TELEGRAM_CHAT_ID` to one group ID or a comma-separated list, then restart the server:
+
+```env
+TELEGRAM_CHAT_ID=-1001111111111,-1002222222222
+```
+
+Add the configured bot to each group and allow it to send messages. Alerts and manual settlement completion notifications go to every listed group. Spaces and duplicate IDs are ignored. Delivery failures in one group do not prevent delivery to the others. Settlement buttons are accepted from any listed group using the existing webhook secret verification.
+
 ## Transaction Types
 
 The payment engine supports three core transaction types:

@@ -78,6 +78,7 @@ export interface CreateSettlementAttemptData {
 export interface TelegramAlertConfig {
   enabled: boolean;
   botToken: string;
+  /** Comma-separated Telegram chat IDs; a single ID is also supported. */
   chatId: string;
   webhookSecret: string;
 }

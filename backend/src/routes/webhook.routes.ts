@@ -119,7 +119,7 @@ router.post('/telegram', async (req: Request, res: Response) => {
       return res.json({ success: true });
     }
 
-    if (chatId === undefined || String(chatId) !== String(config.settlement.telegram.chatId)) {
+    if (chatId === undefined || !telegramService.isAllowedChat(chatId)) {
       await telegramService.answerCallbackQuery(callbackQueryId, 'This settlement action is not allowed here.', true);
       return res.json({ success: true });
     }

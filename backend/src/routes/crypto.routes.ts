@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { RowDataPacket } from 'mysql2/promise';
-import config from '../config';
+import { fetchUsdPrice } from '../services/payment-engine/rate/rate-service';
 import pool from '../lib/mysql';
 
 const router = Router();
@@ -58,18 +58,8 @@ router.get('/price', async (req: Request, res: Response, next: NextFunction) => 
       return res.status(200).json({ price: rate });
     }
 
-    const response = await axios.get(
-      'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest',
-      {
-        params: { symbol: ticker },
-        headers: {
-          'X-CMC_PRO_API_KEY': config.coinmarketcap.apiKey,
-        },
-        timeout: 10000,
-      }
-    );
-
-    const { price } = response.data.data[ticker].quote.USD;
+    // Quidax {ticker}usdt sell price, CoinMarketCap as fallback
+    const price = await fetchUsdPrice(ticker);
 
     return res.status(200).json({ price });
   } catch (error: any) {
@@ -101,18 +91,8 @@ router.post('/price', async (req: Request, res: Response, next: NextFunction) =>
       return res.status(200).json({ price: rate });
     }
 
-    const response = await axios.get(
-      'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest',
-      {
-        params: { symbol: ticker },
-        headers: {
-          'X-CMC_PRO_API_KEY': config.coinmarketcap.apiKey,
-        },
-        timeout: 10000,
-      }
-    );
-
-    const { price } = response.data.data[ticker].quote.USD;
+    // Quidax {ticker}usdt sell price, CoinMarketCap as fallback
+    const price = await fetchUsdPrice(ticker);
 
     return res.status(200).json({ price });
   } catch (error: any) {

@@ -89,6 +89,11 @@ export const config = {
     database: process.env.DB_NAME || process.env.database || "2settle",
   },
 
+  // Primary price source (public tickers, no auth). CoinMarketCap is the fallback.
+  quidax: {
+    baseUrl: process.env.QUIDAX_BASE_URL || "https://app.quidax.io/api/v1",
+  },
+
   coinmarketcap: {
     apiKey: process.env.COINMARKETCAP_API_KEY || "",
   },
@@ -154,6 +159,8 @@ export const config = {
     staleAfterMinutes: Number(process.env.RATE_ALERT_STALE_AFTER_MINUTES || '45'),
     checkIntervalSeconds: Number(process.env.RATE_ALERT_CHECK_INTERVAL_SECONDS || '60'),
     cooldownMinutes: Number(process.env.RATE_ALERT_COOLDOWN_MINUTES || '60'),
+    // Quidax failures are emailed as a digest, at most once per this window (per process)
+    quidaxDigestMinutes: Number(process.env.RATE_ALERT_QUIDAX_DIGEST_MINUTES || '5'),
     stateDirectory: process.env.RATE_ALERT_STATE_DIRECTORY || path.resolve(process.cwd(), 'logs/rate-alerts'),
   },
 

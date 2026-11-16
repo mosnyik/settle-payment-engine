@@ -35,7 +35,7 @@ export function validateRateAlertConfig(): void {
   getRateRowId();
 }
 
-const smtp = () => nodemailer.createTransport({
+export const createAlertTransport = () => nodemailer.createTransport({
   host: config.auth.email.smtpHost,
   port: config.auth.email.smtpPort,
   secure: config.auth.email.smtpPort === 465,
@@ -59,7 +59,7 @@ export async function checkRateAlerts(): Promise<void> {
   const decision = decideAlert(outcome, state, now,
     config.rateAlerts.staleAfterMinutes * 60000, config.rateAlerts.cooldownMinutes * 60000);
   if (!decision) return;
-  const transport = smtp();
+  const transport = createAlertTransport();
   try {
     const result = await transport.sendMail({
       from: config.rateAlerts.from,

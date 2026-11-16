@@ -1,6 +1,9 @@
 import axios from 'axios';
 import { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import pool from '../../../lib/mysql';
+import config from '../../../config';
+import { fetchQuidaxSellPrice } from './quidax';
+import { describeQuidaxError, recordQuidaxFailure } from './quidax-failure-alerts';
 
 const COINGECKO_USDT_NGN_URL =
   'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=ngn';
@@ -39,7 +42,24 @@ function parseRate(value: string | number | null, fieldName: string): number {
   return parsed;
 }
 
-async function fetchLiveRate(): Promise<number> {
+async function fetchFromCoinMarketCap(): Promise<number> {
+  const response = await axios.get(
+    'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest',
+    {
+      params: { symbol: 'USDT', convert: 'NGN' },
+      headers: { 'X-CMC_PRO_API_KEY': config.coinmarketcap.apiKey },
+      timeout: REQUEST_TIMEOUT_MS,
+    }
+  );
+
+  const rate = response.data?.data?.USDT?.quote?.NGN?.price;
+  if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) {
+    throw new Error('CoinMarketCap response did not contain a valid NGN rate');
+  }
+  return rate;
+}
+
+async function fetchFromCoinGecko(): Promise<number> {
   const response = await axios.get<CoinGeckoResponse>(COINGECKO_USDT_NGN_URL, {
     timeout: REQUEST_TIMEOUT_MS,
     headers: { Accept: 'application/json' },
@@ -47,11 +67,51 @@ async function fetchLiveRate(): Promise<number> {
 
   const liveRate = response.data?.tether?.ngn;
 
-  if (typeof liveRate !== 'number' || !Number.isFinite(liveRate)) {
+  if (typeof liveRate !== 'number' || !Number.isFinite(liveRate) || liveRate <= 0) {
     throw new Error('CoinGecko response did not contain a valid NGN rate');
   }
 
-  return Number(liveRate.toFixed(2));
+  return liveRate;
+}
+
+/**
+ * USDT/NGN rate: Quidax `usdtngn` sell price, falling back to CoinMarketCap,
+ * then CoinGecko.
+ */
+async function fetchLiveRate(): Promise<number> {
+  const sources: Array<[string, () => Promise<number>]> = [
+    ['Quidax', () => fetchQuidaxSellPrice('usdtngn')],
+    ['CoinMarketCap', fetchFromCoinMarketCap],
+    ['CoinGecko', fetchFromCoinGecko],
+  ];
+
+  const errors: string[] = [];
+  let quidaxReason: string | undefined;
+  const reportQuidax = (fallback: string) => {
+    if (quidaxReason !== undefined) {
+      recordQuidaxFailure({ market: 'usdtngn', source: 'USDT/NGN rate updater', reason: quidaxReason, fallback });
+    }
+  };
+
+  for (const [name, fetchRate] of sources) {
+    try {
+      const rate = await fetchRate();
+      if (errors.length) {
+        console.warn(`[UpdateRateJob] Using ${name} rate after failures: ${errors.join('; ')}`);
+      }
+      reportQuidax(
+        `${name} succeeded (${rate.toFixed(2)})` + (errors.length > 1 ? ` after: ${errors.slice(1).join('; ')}` : ''),
+      );
+      return Number(rate.toFixed(2));
+    } catch (error) {
+      const reason = describeQuidaxError(error);
+      if (name === 'Quidax') quidaxReason = reason;
+      errors.push(`${name}: ${reason}`);
+    }
+  }
+
+  reportQuidax(`All fallbacks failed too: ${errors.slice(1).join('; ')} — rate NOT updated`);
+  throw new Error(`All USDT/NGN rate sources failed — ${errors.join('; ')}`);
 }
 
 export async function updateRateJob(rateId: number = 1): Promise<RateUpdateResult> {

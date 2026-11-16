@@ -2,6 +2,7 @@ import pool from '../lib/mysql';
 import config from '../config';
 import { updateRateJob } from '../services/payment-engine/rate/update-rate-job';
 import { recordRateOutcome } from '../services/payment-engine/rate/rate-email-alerts';
+import { flushQuidaxFailureAlerts } from '../services/payment-engine/rate/quidax-failure-alerts';
 
 function logPrefix(): string {
   const lagosTime = new Intl.DateTimeFormat('en-CA', {
@@ -51,5 +52,11 @@ main()
     }
   })
   .finally(async () => {
+    // Short-lived process: send any Quidax failures now instead of waiting for the digest window.
+    try {
+      await flushQuidaxFailureAlerts();
+    } catch (error) {
+      console.error(`${logPrefix()} Could not send Quidax failure email:`, error instanceof Error ? error.message : 'Unknown error');
+    }
     await pool.end();
   });

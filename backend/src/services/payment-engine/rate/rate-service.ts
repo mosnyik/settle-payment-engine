@@ -12,6 +12,8 @@ import {
 import { RateServiceUnavailableError } from "../errors";
 import config from "../../../config";
 import { getBestRate, clearAggregatorCache } from "./rate-aggregator";
+import { fetchQuidaxSellPrice } from "./quidax";
+import { describeQuidaxError, recordQuidaxFailure } from "./quidax-failure-alerts";
 
 interface RateData {
   exchangeRate: number;
@@ -99,42 +101,74 @@ async function fetchExchangeRateFromAggregator(
 // Keep the old name as an internal alias so __testing__ exports still work.
 const fetchExchangeRateFromDb = fetchExchangeRateFromAggregator;
 
-async function fetchAssetPriceFromApi(
-  crypto: CryptoCurrency,
-): Promise<AssetPrice> {
-  try {
-    if (crypto === "USDT") {
-      return {
-        symbol: "USDT",
-        priceUsd: 1,
-        fetchedAt: new Date(),
-      };
-    }
-
-    const response = await axios.get(
-      "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest",
-      {
-        params: { symbol: crypto },
-        headers: {
-          "X-CMC_PRO_API_KEY": config.coinmarketcap.apiKey,
-        },
-        timeout: 10000,
+async function fetchUsdPriceFromCoinMarketCap(symbol: string): Promise<number> {
+  const response = await axios.get(
+    "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest",
+    {
+      params: { symbol },
+      headers: {
+        "X-CMC_PRO_API_KEY": config.coinmarketcap.apiKey,
       },
-    );
+      timeout: 10000,
+    },
+  );
 
-    const priceUsd = response.data.data[crypto].quote.USD.price;
+  const price = response.data?.data?.[symbol]?.quote?.USD?.price;
+  if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) {
+    throw new Error(`CoinMarketCap returned no valid USD price for ${symbol}`);
+  }
+  return price;
+}
 
-    return {
-      symbol: crypto,
-      priceUsd,
-      fetchedAt: new Date(),
-    };
+/**
+ * USD (USDT) price for a symbol: Quidax `{symbol}usdt` sell price first,
+ * CoinMarketCap as fallback.
+ */
+export async function fetchUsdPrice(symbol: string): Promise<number> {
+  const upper = symbol.toUpperCase();
+  const market = `${upper.toLowerCase()}usdt`;
+  let quidaxReason: string;
+  try {
+    return await fetchQuidaxSellPrice(market);
+  } catch (quidaxError) {
+    quidaxReason = describeQuidaxError(quidaxError);
+  }
+
+  const source = "crypto USD price (API server)";
+  try {
+    const price = await fetchUsdPriceFromCoinMarketCap(upper);
+    recordQuidaxFailure({ market, source, reason: quidaxReason, fallback: `CoinMarketCap succeeded (${price})` });
+    return price;
   } catch (error) {
+    recordQuidaxFailure({
+      market,
+      source,
+      reason: quidaxReason,
+      fallback: `CoinMarketCap failed too: ${describeQuidaxError(error)} — no price returned`,
+    });
     throw new RateServiceUnavailableError(
-      `Failed to fetch ${crypto} price`,
+      `Failed to fetch ${upper} price`,
       error instanceof Error ? error : undefined,
     );
   }
+}
+
+async function fetchAssetPriceFromApi(
+  crypto: CryptoCurrency,
+): Promise<AssetPrice> {
+  if (crypto === "USDT") {
+    return {
+      symbol: "USDT",
+      priceUsd: 1,
+      fetchedAt: new Date(),
+    };
+  }
+
+  return {
+    symbol: crypto,
+    priceUsd: await fetchUsdPrice(crypto),
+    fetchedAt: new Date(),
+  };
 }
 
 export async function getExchangeRate(

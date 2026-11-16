@@ -59,20 +59,28 @@ async function mockDatabaseRate(currentRate: number = 1600) {
 }
 
 /**
- * Setup mock for CoinMarketCap API.
+ * Setup mock for the Quidax ticker API (primary price source).
  */
-async function mockCoinMarketCapPrice(symbol: string, price: number) {
+async function mockQuidaxSellPrice(sell: number) {
   const axios = await getMockedAxios();
   (axios.get as any).mockResolvedValue({
     data: {
-      data: {
-        [symbol]: {
-          quote: {
-            USD: { price },
-          },
-        },
-      },
+      status: 'success',
+      data: { ticker: { buy: String(sell * 0.99), sell: String(sell), last: String(sell) } },
     },
+  });
+}
+
+/**
+ * Setup mock where Quidax fails and CoinMarketCap (fallback) answers.
+ */
+async function mockCoinMarketCapPrice(symbol: string, price: number) {
+  const axios = await getMockedAxios();
+  (axios.get as any).mockImplementation(async (url: string) => {
+    if (url.includes('quidax')) throw new Error('Quidax down');
+    return {
+      data: { data: { [symbol]: { quote: { USD: { price } } } } },
+    };
   });
 }
 
@@ -116,6 +124,26 @@ describe('Rate Service', () => {
 
       expect(lock.rate).toBeCloseTo(1584, 1);
       expect(lock.assetPrice).toBe(95000);
+    });
+
+    it('should price BTC from the Quidax btcusdt sell price', async () => {
+      await mockDatabaseRate(1600);
+      await mockQuidaxSellPrice(64445.25);
+      const axios = await getMockedAxios();
+
+      const lock = await lockRate('BTC', 'NGN');
+
+      expect(lock.assetPrice).toBe(64445.25);
+      expect(axios.get).toHaveBeenCalledTimes(1);
+      expect((axios.get as any).mock.calls[0][0]).toContain('/markets/tickers/btcusdt');
+    });
+
+    it('should fail with RateServiceUnavailableError when Quidax and CoinMarketCap both fail', async () => {
+      await mockDatabaseRate(1600);
+      const axios = await getMockedAxios();
+      (axios.get as any).mockRejectedValue(new Error('network down'));
+
+      await expect(lockRate('ETH', 'NGN')).rejects.toThrow('Failed to fetch ETH price');
     });
 
     it('should lock rate for ETH', async () => {
@@ -320,7 +348,7 @@ describe('Rate Service', () => {
 
     it('should cache asset prices', async () => {
       await mockDatabaseRate(1600);
-      await mockCoinMarketCapPrice('BTC', 95000);
+      await mockQuidaxSellPrice(95000);
 
       const axios = await getMockedAxios();
 

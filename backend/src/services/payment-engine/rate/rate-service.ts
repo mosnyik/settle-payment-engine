@@ -61,15 +61,22 @@ class RateCache {
 
 const cache = new RateCache();
 
+/**
+ * Every rate a user sees or is charged at is the source rate (rates.current_rate,
+ * i.e. the Quidax USDT/NGN price) minus the USER_RATE_SPREAD fraction (default 1%).
+ * Use applyUserRateSpread() everywhere, never a local percentage, so displayed
+ * and locked rates match.
+ */
+export function applyUserRateSpread(rate: number): number {
+  return rate * (1 - config.rateEngine.userSpread);
+}
+
 async function fetchExchangeRateFromAggregator(
   fiatCurrency: FiatCurrency,
 ): Promise<RateData> {
   try {
     const quote = await getBestRate(fiatCurrency);
-
-    // Apply 1% downward adjustment so the locked rate accounts for slippage
-    const adjustment = 0.01 * quote.rate;
-    const adjustedRate = quote.rate - adjustment;
+    const adjustedRate = applyUserRateSpread(quote.rate);
 
     // merchant_rate / profit_rate come from the DB row; read them separately
     // so we can still surface them without duplicating the provider abstraction.

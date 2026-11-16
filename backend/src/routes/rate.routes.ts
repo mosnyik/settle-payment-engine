@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import pool from "../lib/mysql";
 import { RowDataPacket } from "mysql2/promise";
-import { getAssetPrice } from "../services/payment-engine/rate/rate-service";
+import { applyUserRateSpread, getAssetPrice } from "../services/payment-engine/rate/rate-service";
 
 const router = Router();
 
@@ -25,9 +25,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     const raw = result.current_rate;
     const array_rate = raw.toString();
     const numRate = Number(array_rate);
-    const percentage = 0.8;
-    const increase = (percentage / 100) * numRate;
-    const rate = numRate - increase;
+    const rate = applyUserRateSpread(numRate);
     const data = rate.toLocaleString();
 
     return res.status(200).json({ rate: data });
@@ -100,10 +98,7 @@ router.get("/all", async (req: Request, res: Response, next: NextFunction) => {
     const merchantRate = parseRate(result.merchant_rate);
     const profitRate = result.profit_rate ? parseRate(result.profit_rate) : 0;
 
-    // Apply 0.8% adjustment to current rate
-    const percentage = 0.8;
-    const adjustment = (percentage / 100) * currentRate;
-    const adjustedRate = currentRate - adjustment;
+    const adjustedRate = applyUserRateSpread(currentRate);
 
     return res.status(200).json({
       rate: adjustedRate.toLocaleString(),
@@ -144,8 +139,7 @@ router.get("/limits", async (req: Request, res: Response, next: NextFunction) =>
       parseFloat(typeof v === "number" ? v.toString() : v.toString().replace(/,/g, ""));
 
     const rawRate = parseRate(rateRows[0].current_rate);
-    const adjustment = (0.8 / 100) * rawRate;
-    const rate = rawRate - adjustment; // NGN per USD
+    const rate = applyUserRateSpread(rawRate); // NGN per USD
 
     // --- Prices for both crypto and estimateAsset ---
     const cryptoPrice = await getAssetPrice(crypto as any);

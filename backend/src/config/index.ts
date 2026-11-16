@@ -9,6 +9,21 @@ export function parseRateAlertRecipients(value: string): string[] {
   return [...new Set(value.split(',').map((email) => email.trim()).filter(Boolean))];
 }
 
+export const DEFAULT_USER_RATE_SPREAD = 0.01;
+
+/** USER_RATE_SPREAD as a fraction (0.01 = 1%). Missing/invalid -> 1%. */
+export function parseUserRateSpread(value: string | undefined): number {
+  if (value === undefined || value.trim() === '') return DEFAULT_USER_RATE_SPREAD;
+  const spread = Number(value);
+  if (!Number.isFinite(spread) || spread < 0 || spread >= 1) {
+    console.warn(
+      `[Config] Invalid USER_RATE_SPREAD "${value}" (expected a fraction like 0.01 for 1%) — using ${DEFAULT_USER_RATE_SPREAD}`,
+    );
+    return DEFAULT_USER_RATE_SPREAD;
+  }
+  return spread;
+}
+
 export const config = {
   port: parseInt(process.env.PORT || "3500", 10),
 
@@ -165,6 +180,9 @@ export const config = {
   },
 
   rateEngine: {
+    // Fraction taken off the source rate for every user-facing rate (0.01 = 1%).
+    // Missing or invalid (not 0 <= x < 1) falls back to 1%.
+    userSpread: parseUserRateSpread(process.env.USER_RATE_SPREAD),
     // How often the background job fetches fresh quotes from external providers (ms)
     fetchIntervalMs: parseInt(process.env.RATE_FETCH_INTERVAL_MS || '30000', 10),
     providers: {

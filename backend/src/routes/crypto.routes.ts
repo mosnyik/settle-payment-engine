@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { RowDataPacket } from 'mysql2/promise';
-import { fetchUsdPrice } from '../services/payment-engine/rate/rate-service';
+import { applyUserRateSpread, fetchUsdPrice } from '../services/payment-engine/rate/rate-service';
 import pool from '../lib/mysql';
 
 const router = Router();
@@ -17,9 +17,7 @@ async function getCurrentRate(): Promise<number> {
   }
   const raw = results[0].current_rate;
   const numRate = typeof raw === 'number' ? raw : parseFloat(raw.toString().replace(/,/g, ''));
-  const percentage = 0.8;
-  const adjustment = (percentage / 100) * numRate;
-  return numRate - adjustment;
+  return applyUserRateSpread(numRate);
 }
 
 // Helper to get base symbol (e.g., USDT-BEP20 -> USDT)

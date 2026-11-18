@@ -56,7 +56,7 @@ router.get('/price', async (req: Request, res: Response, next: NextFunction) => 
       return res.status(200).json({ price: rate });
     }
 
-    // Quidax {ticker}usdt sell price, CoinMarketCap as fallback
+    // Quidax {ticker}usdt buy price, CoinMarketCap as fallback
     const price = await fetchUsdPrice(ticker);
 
     return res.status(200).json({ price });
@@ -89,7 +89,7 @@ router.post('/price', async (req: Request, res: Response, next: NextFunction) =>
       return res.status(200).json({ price: rate });
     }
 
-    // Quidax {ticker}usdt sell price, CoinMarketCap as fallback
+    // Quidax {ticker}usdt buy price, CoinMarketCap as fallback
     const price = await fetchUsdPrice(ticker);
 
     return res.status(200).json({ price });

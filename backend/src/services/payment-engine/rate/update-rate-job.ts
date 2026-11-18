@@ -2,7 +2,7 @@ import axios from 'axios';
 import { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import pool from '../../../lib/mysql';
 import config from '../../../config';
-import { fetchQuidaxSellPrice } from './quidax';
+import { fetchQuidaxBuyPrice } from './quidax';
 import { describeQuidaxError, recordQuidaxFailure } from './quidax-failure-alerts';
 
 const COINGECKO_USDT_NGN_URL =
@@ -75,12 +75,12 @@ async function fetchFromCoinGecko(): Promise<number> {
 }
 
 /**
- * USDT/NGN rate: Quidax `usdtngn` sell price, falling back to CoinMarketCap,
+ * USDT/NGN rate: Quidax `usdtngn` buy price, falling back to CoinMarketCap,
  * then CoinGecko.
  */
 async function fetchLiveRate(): Promise<number> {
   const sources: Array<[string, () => Promise<number>]> = [
-    ['Quidax', () => fetchQuidaxSellPrice('usdtngn')],
+    ['Quidax', () => fetchQuidaxBuyPrice('usdtngn')],
     ['CoinMarketCap', fetchFromCoinMarketCap],
     ['CoinGecko', fetchFromCoinGecko],
   ];

@@ -61,12 +61,12 @@ async function mockDatabaseRate(currentRate: number = 1600) {
 /**
  * Setup mock for the Quidax ticker API (primary price source).
  */
-async function mockQuidaxSellPrice(sell: number) {
+async function mockQuidaxBuyPrice(buy: number) {
   const axios = await getMockedAxios();
   (axios.get as any).mockResolvedValue({
     data: {
       status: 'success',
-      data: { ticker: { buy: String(sell * 0.99), sell: String(sell), last: String(sell) } },
+      data: { ticker: { buy: String(buy), sell: String(buy * 1.01), last: String(buy) } },
     },
   });
 }
@@ -126,9 +126,9 @@ describe('Rate Service', () => {
       expect(lock.assetPrice).toBe(95000);
     });
 
-    it('should price BTC from the Quidax btcusdt sell price', async () => {
+    it('should price BTC from the Quidax btcusdt buy price', async () => {
       await mockDatabaseRate(1600);
-      await mockQuidaxSellPrice(64445.25);
+      await mockQuidaxBuyPrice(64445.25);
       const axios = await getMockedAxios();
 
       const lock = await lockRate('BTC', 'NGN');
@@ -348,7 +348,7 @@ describe('Rate Service', () => {
 
     it('should cache asset prices', async () => {
       await mockDatabaseRate(1600);
-      await mockQuidaxSellPrice(95000);
+      await mockQuidaxBuyPrice(95000);
 
       const axios = await getMockedAxios();
 

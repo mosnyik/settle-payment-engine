@@ -12,7 +12,7 @@ import {
 import { RateServiceUnavailableError } from "../errors";
 import config from "../../../config";
 import { getBestRate, clearAggregatorCache } from "./rate-aggregator";
-import { fetchQuidaxSellPrice } from "./quidax";
+import { fetchQuidaxBuyPrice } from "./quidax";
 import { describeQuidaxError, recordQuidaxFailure } from "./quidax-failure-alerts";
 
 interface RateData {
@@ -128,7 +128,7 @@ async function fetchUsdPriceFromCoinMarketCap(symbol: string): Promise<number> {
 }
 
 /**
- * USD (USDT) price for a symbol: Quidax `{symbol}usdt` sell price first,
+ * USD (USDT) price for a symbol: Quidax `{symbol}usdt` buy price first,
  * CoinMarketCap as fallback.
  */
 export async function fetchUsdPrice(symbol: string): Promise<number> {
@@ -136,7 +136,7 @@ export async function fetchUsdPrice(symbol: string): Promise<number> {
   const market = `${upper.toLowerCase()}usdt`;
   let quidaxReason: string;
   try {
-    return await fetchQuidaxSellPrice(market);
+    return await fetchQuidaxBuyPrice(market);
   } catch (quidaxError) {
     quidaxReason = describeQuidaxError(quidaxError);
   }

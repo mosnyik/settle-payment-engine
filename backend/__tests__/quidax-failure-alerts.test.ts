@@ -110,7 +110,7 @@ describe('Quidax failure digest emails', () => {
       response: { status: 429, statusText: 'Too Many Requests', data: { message: 'slow down' } },
     });
     expect(describeQuidaxError(error)).toBe('HTTP 429 Too Many Requests — {"message":"slow down"}');
-    expect(describeQuidaxError(new Error('Quidax btcusdt ticker has no valid sell price')))
-      .toBe('Quidax btcusdt ticker has no valid sell price');
+    expect(describeQuidaxError(new Error('Quidax btcusdt ticker has no valid buy price')))
+      .toBe('Quidax btcusdt ticker has no valid buy price');
   });
 });

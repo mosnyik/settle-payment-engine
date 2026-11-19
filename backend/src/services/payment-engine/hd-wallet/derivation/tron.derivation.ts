@@ -9,6 +9,7 @@ import { HDKey } from '@scure/bip32';
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { ChainDerivation, KeyMaterial, DERIVATION_PATHS } from '../types';
+import { isValidTronAddress } from '../../../../utils/address-validation';
 
 const DERIVATION_PATH_BASE = DERIVATION_PATHS.tron;
 
@@ -125,19 +126,8 @@ export class TronDerivation implements ChainDerivation {
    * @returns True if valid Tron address
    */
   isValidAddress(address: string): boolean {
-    // Tron addresses start with T and are 34 characters
-    if (!address.startsWith('T') || address.length !== 34) {
-      return false;
-    }
-
-    // Check Base58 characters
-    for (const char of address) {
-      if (!BASE58_ALPHABET.includes(char)) {
-        return false;
-      }
-    }
-
-    return true;
+    // Full base58check checksum validation (shared with merchant wallets)
+    return isValidTronAddress(address);
   }
 }
 

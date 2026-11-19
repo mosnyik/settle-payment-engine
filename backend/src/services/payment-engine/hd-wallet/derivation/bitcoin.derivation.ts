@@ -8,6 +8,7 @@
 import { HDKey } from '@scure/bip32';
 import * as btc from '@scure/btc-signer';
 import { ChainDerivation, KeyMaterial, DERIVATION_PATHS } from '../types';
+import { isValidBitcoinAddress } from '../../../../utils/address-validation';
 
 const DERIVATION_PATH_BASE = DERIVATION_PATHS.bitcoin;
 
@@ -64,27 +65,8 @@ export class BitcoinDerivation implements ChainDerivation {
    * @returns True if valid Bitcoin address
    */
   isValidAddress(address: string): boolean {
-    // Native SegWit (bc1q...)
-    if (address.startsWith('bc1q') && address.length >= 42 && address.length <= 62) {
-      return /^bc1q[a-z0-9]{38,58}$/.test(address);
-    }
-
-    // Taproot (bc1p...)
-    if (address.startsWith('bc1p') && address.length >= 42 && address.length <= 62) {
-      return /^bc1p[a-z0-9]{38,58}$/.test(address);
-    }
-
-    // Legacy P2PKH (1...)
-    if (address.startsWith('1') && address.length >= 26 && address.length <= 34) {
-      return /^1[a-km-zA-HJ-NP-Z0-9]{25,33}$/.test(address);
-    }
-
-    // Legacy P2SH (3...)
-    if (address.startsWith('3') && address.length >= 26 && address.length <= 34) {
-      return /^3[a-km-zA-HJ-NP-Z0-9]{25,33}$/.test(address);
-    }
-
-    return false;
+    // Full bech32/base58check checksum validation (shared with merchant wallets)
+    return isValidBitcoinAddress(address);
   }
 }
 

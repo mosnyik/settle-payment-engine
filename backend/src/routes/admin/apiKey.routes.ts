@@ -6,8 +6,11 @@ import {
   listApiKeysByMerchant,
   updateApiKey,
   updateParentWallets,
+  updateMerchantCollection,
+  MerchantCollectionConfigError,
   revokeApiKey,
 } from '../../security/services/apiKey.service';
+import { COLLECTION_ASSETS, parseCollectionModes } from '../../services/payment-engine/collection';
 import { settlementService } from '../../services/payment-engine/settlement/settlement.service';
 import { pool } from '../../lib/mysql';
 import { RowDataPacket } from 'mysql2';
@@ -54,6 +57,31 @@ const createApiKeySchema = z.object({
   isSandbox: z.boolean().optional(),
 });
 
+const collectionModesSchema = z
+  .record(z.enum(['hd', 'merchant']))
+  .superRefine((val, ctx) => {
+    for (const asset of Object.keys(val)) {
+      if (!(COLLECTION_ASSETS as readonly string[]).includes(asset)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `collectionModes keys must be one of: ${COLLECTION_ASSETS.join(', ')}`,
+          path: [asset],
+        });
+      }
+    }
+  })
+  .optional();
+
+const walletAddressSchema = z.string().trim().min(1).max(100).nullable().optional();
+
+function merchantCollectionErrorResponse(res: Response, err: MerchantCollectionConfigError) {
+  return res.status(400).json({
+    error: 'Invalid merchant collection settings',
+    code: 'VALIDATION_ERROR',
+    details: err.problems,
+  });
+}
+
 const updateApiKeySchema = z.object({
   name: z.string().min(1).max(100).optional(),
   permissions: z.array(z.string()).optional(),
@@ -63,6 +91,13 @@ const updateApiKeySchema = z.object({
   sweepAddress: z.string().nullable().optional(),
   settlementMode: z.enum(['mongoro', 'self']).optional(),
   confirmationThresholds: confirmationThresholdsSchema,
+  // Merchant collection: per-asset mode, the merchant's wallets, and the
+  // WhatsApp number that receives settlement instructions
+  collectionModes: collectionModesSchema,
+  parentWalletBitcoin: walletAddressSchema,
+  parentWalletEthereum: walletAddressSchema,
+  parentWalletTron: walletAddressSchema,
+  whatsappPhone: z.string().trim().max(20).nullable().optional(),
 });
 
 // =============================================================================
@@ -160,6 +195,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           parentWalletBitcoin: row.parent_wallet_bitcoin ?? null,
           parentWalletEthereum: row.parent_wallet_ethereum ?? null,
           parentWalletTron: row.parent_wallet_tron ?? null,
+          collectionModes: parseCollectionModes(row.collection_modes),
+          whatsappPhone: row.whatsapp_phone ?? null,
         };
       });
     }
@@ -211,7 +248,14 @@ router.get('/:keyId', async (req: Request, res: Response, next: NextFunction) =>
  *   "name": "New Name",                     // optional
  *   "permissions": ["transfer.*"],          // optional
  *   "rateLimitTier": "premium",             // optional
- *   "ipWhitelist": ["10.0.0.0/8"] | null    // optional, null removes whitelist
+ *   "ipWhitelist": ["10.0.0.0/8"] | null,   // optional, null removes whitelist
+ *
+ *   // Merchant collection (all optional, validated together):
+ *   "collectionModes": { "BTC": "merchant" },   // per asset; unlisted assets use "hd"
+ *   "parentWalletBitcoin": "bc1q...",           // checksum-validated per chain
+ *   "parentWalletEthereum": "0x...",            // ETH, BNB, ERC20, BEP20
+ *   "parentWalletTron": "T...",
+ *   "whatsappPhone": "+2348012345678"           // required once any asset is "merchant"
  * }
  */
 router.patch('/:keyId', async (req: Request, res: Response, next: NextFunction) => {
@@ -235,6 +279,28 @@ router.patch('/:keyId', async (req: Request, res: Response, next: NextFunction) 
         error: 'API key not found',
         code: 'API_KEY_NOT_FOUND',
       });
+    }
+
+    // Merchant collection settings first: they are validated as a whole and
+    // nothing is written if any check fails
+    const { collectionModes, parentWalletBitcoin, parentWalletEthereum, parentWalletTron, whatsappPhone } = parsed.data;
+    if (
+      collectionModes !== undefined ||
+      parentWalletBitcoin !== undefined ||
+      parentWalletEthereum !== undefined ||
+      parentWalletTron !== undefined ||
+      whatsappPhone !== undefined
+    ) {
+      try {
+        await updateMerchantCollection(keyId, {
+          collectionModes,
+          wallets: { bitcoin: parentWalletBitcoin, ethereum: parentWalletEthereum, tron: parentWalletTron },
+          whatsappPhone,
+        });
+      } catch (err) {
+        if (err instanceof MerchantCollectionConfigError) return merchantCollectionErrorResponse(res, err);
+        throw err;
+      }
     }
 
     const updated = await updateApiKey(keyId, {
@@ -299,9 +365,9 @@ router.delete('/:keyId', async (req: Request, res: Response, next: NextFunction)
 // =============================================================================
 
 const updateParentWalletsSchema = z.object({
-  bitcoin: z.string().min(1).optional().nullable(),
-  ethereum: z.string().min(1).optional().nullable(),
-  tron: z.string().min(1).optional().nullable(),
+  bitcoin: walletAddressSchema,
+  ethereum: walletAddressSchema,
+  tron: walletAddressSchema,
 });
 
 /**
@@ -329,7 +395,12 @@ router.get('/:keyId/wallets', async (req: Request, res: Response, next: NextFunc
           bitcoin: apiKey.parentWalletBitcoin,
           ethereum: apiKey.parentWalletEthereum,
           tron: apiKey.parentWalletTron,
-          note: 'Your provided destination wallets. Swept funds are sent here.',
+          note: 'Your provided wallets. Swept funds are sent here; merchant-collected assets are deposited here directly.',
+        },
+        collection: {
+          modes: apiKey.collectionModes,
+          whatsappPhone: apiKey.whatsappPhone,
+          note: 'Assets not listed use "hd" (derived address + sweep).',
         },
       },
     });
@@ -362,11 +433,17 @@ router.put('/:keyId/wallets', async (req: Request, res: Response, next: NextFunc
       return res.status(404).json({ error: 'API key not found', code: 'API_KEY_NOT_FOUND' });
     }
 
-    const updated = await updateParentWallets(keyId, {
-      bitcoin: parsed.data.bitcoin,
-      ethereum: parsed.data.ethereum,
-      tron: parsed.data.tron,
-    });
+    let updated;
+    try {
+      updated = await updateParentWallets(keyId, {
+        bitcoin: parsed.data.bitcoin,
+        ethereum: parsed.data.ethereum,
+        tron: parsed.data.tron,
+      });
+    } catch (err) {
+      if (err instanceof MerchantCollectionConfigError) return merchantCollectionErrorResponse(res, err);
+      throw err;
+    }
 
     return res.status(200).json({
       status: true,

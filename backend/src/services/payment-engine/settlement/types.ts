@@ -101,6 +101,27 @@ export interface SettlementConfig {
   hyparrow: HyparrowConfig;
   mongoro: { webhookIps: string[] };
   telegram: TelegramAlertConfig;
+  merchantCollection: MerchantCollectionSettlementConfig;
+}
+
+/**
+ * Settlement for merchant-collected sessions: the crypto is already in the
+ * merchant's wallet, so instead of a fiat payout the merchant is sent a
+ * WhatsApp message telling them what to pay the recipient and 2Settle.
+ */
+export interface MerchantCollectionSettlementConfig {
+  whatsapp: {
+    enabled: boolean;
+    /** Approved Utility template (see merchant-settlement-whatsapp.ts for its parameters) */
+    templateName: string;
+    templateLanguage: string;
+  };
+  /** 2Settle account the merchant pays the spread profit into */
+  profitAccount: {
+    bankName: string;
+    accountNumber: string;
+    accountName: string;
+  };
 }
 
 // =============================================================================

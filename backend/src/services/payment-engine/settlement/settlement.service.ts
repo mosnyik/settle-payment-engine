@@ -22,6 +22,13 @@ import {
   HyparrowTransferWebhook,
 } from './types';
 import { getApiKeyById } from '../../../security/services/apiKey.service';
+import {
+  MerchantSettlementWhatsApp,
+  merchantSettlementWhatsApp,
+  MerchantSettlementInstruction,
+  computeMerchantSettlementAmounts,
+  formatInstructionForTelegram,
+} from './merchant-settlement';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 
 interface ReceiverRow extends RowDataPacket {
@@ -63,6 +70,16 @@ interface SessionRow extends RowDataPacket {
   description: string | null;
   settlement_token: string | null;
   settlement_token_expires_at: Date | null;
+  // Merchant-collection settlement
+  collection_mode?: 'hd' | 'merchant' | null;
+  crypto?: string | null;
+  network?: string | null;
+  crypto_amount?: number | string | null;
+  received_amount?: number | string | null;
+  rate?: number | string | null;
+  market_rate?: number | string | null;
+  asset_price?: number | string | null;
+  tx_hash?: string | null;
 }
 
 export class SettlementService {
@@ -70,17 +87,20 @@ export class SettlementService {
   private readonly router: SettlementRouter;
   private readonly telegram: TelegramService;
   private readonly balances: ProviderBalanceRepository;
+  private readonly merchantWhatsApp: MerchantSettlementWhatsApp;
 
   constructor(
     settlementConfig: SettlementConfig = config.settlement,
     router: SettlementRouter = settlementRouter,
     telegramSvc: TelegramService = telegramService,
-    balances: ProviderBalanceRepository = providerBalanceRepository
+    balances: ProviderBalanceRepository = providerBalanceRepository,
+    merchantWhatsAppSvc: MerchantSettlementWhatsApp = merchantSettlementWhatsApp
   ) {
     this.config = settlementConfig;
     this.router = router;
     this.telegram = telegramSvc;
     this.balances = balances;
+    this.merchantWhatsApp = merchantWhatsAppSvc;
   }
 
   /**
@@ -140,6 +160,13 @@ export class SettlementService {
 
     // 4. Update status to settling
     await this.updateSessionStatus(sessionId, 'settling');
+
+    // Crypto went straight to the merchant's wallet: nothing for us to pay out.
+    // Tell the merchant what to pay the recipient and 2Settle instead.
+    if (session.collection_mode === 'merchant') {
+      await this.sendMerchantSettlementInstruction(session, receiver, payoutFiatAmount);
+      return;
+    }
 
     if (settlementMode === 'self') {
       // Self-settlement: generate a one-time token, store it, fire webhook with token included.
@@ -526,6 +553,95 @@ export class SettlementService {
     return { success: true, message: 'Session marked as settled' };
   }
 
+  /**
+   * Merchant-collected session: WhatsApp the merchant the recipient's payout
+   * and 2Settle's spread profit (with the deposit tx hash as evidence). The
+   * session stays 'settling' until an admin confirms both payments via
+   * manualSettle. If the message can't be sent, ops get the same details on
+   * Telegram to forward by hand.
+   */
+  private async sendMerchantSettlementInstruction(
+    session: SessionRow,
+    receiver: ReceiverData,
+    payoutFiatAmount: number
+  ): Promise<void> {
+    const num = (v: number | string | null | undefined) => (v == null ? null : Number(v));
+    const amounts = computeMerchantSettlementAmounts({
+      payoutFiat: payoutFiatAmount,
+      cryptoReceived: num(session.received_amount) ?? num(session.crypto_amount),
+      assetPrice: num(session.asset_price),
+      rate: num(session.rate),
+      marketRate: num(session.market_rate),
+      fallbackSpread: config.rateEngine.userSpread,
+    });
+
+    const instruction: MerchantSettlementInstruction = {
+      reference: session.reference,
+      fiatCurrency: session.fiat_currency,
+      crypto: session.crypto ?? '',
+      network: session.network ?? '',
+      cryptoReceived: num(session.received_amount) ?? num(session.crypto_amount) ?? 0,
+      txHash: session.tx_hash ?? 'unknown',
+      recipient: {
+        accountName: receiver.accountName,
+        bankName: receiver.bankName || receiver.bankCode,
+        accountNumber: receiver.accountNumber,
+      },
+      recipientAmount: amounts.recipientAmount,
+      profitAmount: amounts.profitAmount,
+      profitAccount: { ...this.config.merchantCollection.profitAccount },
+    };
+
+    const apiKey = session.api_key_id ? await getApiKeyById(session.api_key_id).catch(() => null) : null;
+    const merchantPhone = apiKey?.whatsappPhone ?? null;
+    const requestPayload = {
+      recipientAmount: amounts.recipientAmount,
+      profitAmount: amounts.profitAmount,
+      profitEstimated: amounts.profitEstimated,
+      txHash: instruction.txHash,
+      merchantPhone,
+    };
+
+    if (amounts.profitEstimated) {
+      console.warn(`[Settlement] ${session.reference}: market rate missing, profit estimated from current spread`);
+    }
+
+    let messageId: string | null = null;
+    let failure: string | null = null;
+    if (!merchantPhone) {
+      failure = 'Merchant has no WhatsApp number configured';
+    } else {
+      try {
+        messageId = await this.merchantWhatsApp.send(merchantPhone, instruction);
+      } catch (err) {
+        failure = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    await this.createSettlementAttempt({
+      sessionId: session.id,
+      provider: 'merchant_whatsapp',
+      status: messageId ? 'pending' : 'failed', // pending until an admin confirms the merchant paid
+      amount: payoutFiatAmount,
+      accountNumber: receiver.accountNumber,
+      bankCode: receiver.bankCode,
+      accountName: receiver.accountName,
+      reference: messageId ?? undefined,
+      requestPayload,
+      errorMessage: failure ?? undefined,
+    });
+
+    if (messageId) {
+      await this.updateSessionSettlement(session.id, messageId, 'merchant_whatsapp');
+      console.log(`[Settlement] Merchant instruction sent for ${session.reference} (WhatsApp ${messageId})`);
+    } else {
+      console.error(`[Settlement] Merchant instruction NOT sent for ${session.reference}: ${failure}`);
+      await this.telegram.sendMessage(formatInstructionForTelegram(instruction, merchantPhone, failure!));
+    }
+
+    sendPaymentWebhook(session.id, 'payment.settling').catch(() => {});
+  }
+
   // =============================================================================
   // DATABASE HELPERS
   // =============================================================================
@@ -546,7 +662,8 @@ export class SettlementService {
 
   private async getSession(sessionId: string): Promise<SessionRow | null> {
     const [rows] = await pool.execute<SessionRow[]>(
-      `SELECT id, reference, status, fiat_amount, settled_fiat_amount, fiat_currency, receiver_id, api_key_id, is_sandbox, description
+      `SELECT id, reference, status, fiat_amount, settled_fiat_amount, fiat_currency, receiver_id, api_key_id, is_sandbox, description,
+              collection_mode, crypto, network, crypto_amount, received_amount, rate, market_rate, asset_price, tx_hash
        FROM payment_sessions WHERE id = ?`,
       [sessionId]
     );

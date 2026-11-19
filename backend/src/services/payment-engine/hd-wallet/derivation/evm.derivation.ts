@@ -7,6 +7,7 @@
 
 import { HDNodeWallet } from 'ethers';
 import { ChainDerivation, KeyMaterial, DERIVATION_PATHS } from '../types';
+import { isValidEvmAddress } from '../../../../utils/address-validation';
 
 const DERIVATION_PATH_BASE = DERIVATION_PATHS.ethereum;
 
@@ -55,30 +56,10 @@ export class EVMDerivation implements ChainDerivation {
    * @returns True if valid Ethereum address
    */
   isValidAddress(address: string): boolean {
-    // Basic format check: 0x followed by 40 hex characters
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      return false;
-    }
-
-    // If all lowercase or all uppercase, valid (no checksum)
-    const addressLower = address.toLowerCase();
-    const addressUpper = address.toUpperCase();
-    if (address === addressLower || address === `0x${addressUpper.slice(2)}`) {
-      return true;
-    }
-
-    // Validate checksum (EIP-55)
-    return this.validateChecksum(address);
+    // EIP-55 checksum validation (shared with merchant wallets)
+    return isValidEvmAddress(address);
   }
 
-  /**
-   * Validate EIP-55 checksum.
-   */
-  private validateChecksum(address: string): boolean {
-    // For simplicity, accept any properly formatted address
-    // Full EIP-55 checksum validation would require keccak256
-    return /^0x[a-fA-F0-9]{40}$/.test(address);
-  }
 }
 
 export const evmDerivation = new EVMDerivation();

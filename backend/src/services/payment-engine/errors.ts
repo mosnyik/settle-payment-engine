@@ -107,6 +107,26 @@ export class DepositAddressInUseError extends PaymentEngineError {
 
 export class ReceiverWalletInUseError extends DepositAddressInUseError {}
 
+/**
+ * The merchant collects this asset into their own wallet, but has no valid
+ * wallet for the requested network's chain (e.g. USDT set to merchant mode with
+ * only a Tron wallet, and a BEP20 payment requested).
+ */
+export class MerchantWalletNotConfiguredError extends PaymentEngineError {
+  readonly crypto: string;
+  readonly network: string;
+
+  constructor(crypto: string, network: string, reason: string) {
+    super(
+      `Merchant wallet collection for ${crypto} on ${network} is unavailable: ${reason}`,
+      'MERCHANT_WALLET_NOT_CONFIGURED',
+      422
+    );
+    this.crypto = crypto;
+    this.network = network;
+  }
+}
+
 // Resource unavailable errors (503)
 export class WalletPoolEmptyError extends PaymentEngineError {
   readonly network: string;

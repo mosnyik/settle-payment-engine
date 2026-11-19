@@ -117,7 +117,10 @@ export interface CreatePaymentInput {
 // =============================================================================
 
 export interface RateLock {
+  /** Rate the user is quoted (market rate minus USER_RATE_SPREAD) */
   rate: number;
+  /** Market rate before the spread. Spread profit = payout x (marketRate / rate - 1). */
+  marketRate?: number;
   assetPrice: number;
   lockedAt: Date;
   expiresAt: Date;
@@ -171,6 +174,10 @@ export interface PaymentSession {
   description?: string;
   /** True if session was created with a sandbox API key */
   isSandbox?: boolean;
+  /** 'merchant' = deposit went straight to the merchant's wallet; settled by WhatsApp instruction, not payout */
+  collectionMode?: 'hd' | 'merchant';
+  /** Market rate before spread at rate-lock time (used to compute 2Settle's spread profit) */
+  marketRate?: number;
 }
 
 // =============================================================================

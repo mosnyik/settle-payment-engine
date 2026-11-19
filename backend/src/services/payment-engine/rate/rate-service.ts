@@ -17,6 +17,8 @@ import { describeQuidaxError, recordQuidaxFailure } from "./quidax-failure-alert
 
 interface RateData {
   exchangeRate: number;
+  /** Source rate before USER_RATE_SPREAD */
+  marketRate: number;
   merchantRate: number;
   profitRate: number;
 }
@@ -93,6 +95,7 @@ async function fetchExchangeRateFromAggregator(
 
     return {
       exchangeRate: adjustedRate,
+      marketRate: quote.rate,
       merchantRate: parseDbRate(rateRow.merchant_rate),
       profitRate: parseDbRate(rateRow.profit_rate),
     };
@@ -212,6 +215,7 @@ export async function lockRate(
 
   return {
     rate: rateData.exchangeRate,
+    marketRate: rateData.marketRate,
     assetPrice,
     lockedAt: now,
     expiresAt,

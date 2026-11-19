@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionManager } from '@/services/payment-engine/session/session-manager';
 import {
   DepositAddressInUseError,
+  MerchantWalletNotConfiguredError,
   InvalidInputError,
   InvalidSessionStateError,
   SessionNotFoundError,
@@ -90,6 +91,15 @@ const sessionOwnerServiceMock = vi.hoisted(() => ({
 
 vi.mock('@/services/payment-engine/session-owner', () => ({
   sessionOwnerService: sessionOwnerServiceMock,
+}));
+
+// Per-asset collection mode (merchant wallet vs HD) - default HD
+const collectionMock = vi.hoisted(() => ({
+  resolveCollectionTargetForKey: vi.fn(),
+}));
+
+vi.mock('@/services/payment-engine/collection', () => ({
+  resolveCollectionTargetForKey: collectionMock.resolveCollectionTargetForKey,
 }));
 
 // Mock ID generator
@@ -226,6 +236,7 @@ describe('SessionManager', () => {
     hdWalletMock.service = null;
     sessionOwnerServiceMock.getSessionOwnerChainWallet.mockResolvedValue(null);
     sessionOwnerServiceMock.saveSessionOwnerChainWallet.mockResolvedValue(undefined);
+    collectionMock.resolveCollectionTargetForKey.mockResolvedValue({ mode: 'hd' });
     mockRepo = createMockRepository();
     manager = new SessionManager(mockRepo as any);
   });
@@ -357,6 +368,105 @@ describe('SessionManager', () => {
         undefined
       );
       expect(mockRepo.create).not.toHaveBeenCalled();
+    });
+
+    describe('merchant collection', () => {
+      const merchantBtcWallet = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';
+      const btcInput: CreatePaymentInput = { ...validInput, crypto: 'BTC', network: 'bitcoin', apiKeyId: 9 };
+
+      it('uses the merchant wallet as the deposit address, with no derivation (so no sweep)', async () => {
+        const hdWallet = enableHDWallet();
+        collectionMock.resolveCollectionTargetForKey.mockResolvedValue({
+          mode: 'merchant',
+          address: merchantBtcWallet,
+          chain: 'bitcoin',
+        });
+        const { assignWallet } = await import('@/services/payment-engine/wallet');
+
+        const session = await manager.createSession(btcInput);
+
+        expect(collectionMock.resolveCollectionTargetForKey).toHaveBeenCalledWith(9, 'BTC', 'bitcoin');
+        expect(session.depositAddress).toBe(merchantBtcWallet);
+        expect(mockRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+          depositAddress: merchantBtcWallet,
+          collectionMode: 'merchant',
+          derivationIndex: undefined,
+          hdChain: undefined,
+          walletId: undefined,
+        }));
+        expect(hdWallet.deriveNextAddress).not.toHaveBeenCalled();
+        expect(hdWallet.linkAddressToSession).not.toHaveBeenCalled();
+        expect(assignWallet).not.toHaveBeenCalled();
+      });
+
+      it('rejects a second open session on the same merchant wallet and asset', async () => {
+        collectionMock.resolveCollectionTargetForKey.mockResolvedValue({
+          mode: 'merchant',
+          address: merchantBtcWallet,
+          chain: 'bitcoin',
+        });
+        mockRepo.findActiveByDepositAddress.mockResolvedValue(createMockSession({
+          id: 'pay_active',
+          crypto: 'BTC',
+          depositAddress: merchantBtcWallet,
+        }));
+
+        await expect(manager.createSession(btcInput)).rejects.toThrow(DepositAddressInUseError);
+        expect(mockRepo.findActiveByDepositAddress).toHaveBeenCalledWith(merchantBtcWallet, 'BTC', undefined);
+        expect(mockRepo.create).not.toHaveBeenCalled();
+      });
+
+      it('fails instead of falling back to HD when the merchant wallet is missing', async () => {
+        const hdWallet = enableHDWallet();
+        collectionMock.resolveCollectionTargetForKey.mockRejectedValue(
+          new MerchantWalletNotConfiguredError('BTC', 'bitcoin', 'no Bitcoin mainnet wallet set for this merchant')
+        );
+
+        await expect(manager.createSession(btcInput)).rejects.toThrow(MerchantWalletNotConfiguredError);
+        expect(hdWallet.deriveNextAddress).not.toHaveBeenCalled();
+        expect(mockRepo.create).not.toHaveBeenCalled();
+      });
+
+      it('keeps HD collection for assets not in merchant mode', async () => {
+        const hdWallet = enableHDWallet();
+
+        await manager.createSession({ ...validInput, apiKeyId: 9 });
+
+        expect(collectionMock.resolveCollectionTargetForKey).toHaveBeenCalledWith(9, 'USDT', 'bep20');
+        expect(hdWallet.deriveNextAddress).toHaveBeenCalledWith('bep20');
+        expect(mockRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+          depositAddress: '0xDerivedReceiverWallet',
+          collectionMode: 'hd',
+        }));
+      });
+
+      it('uses the merchant wallet when a request is fulfilled with a merchant-collected asset', async () => {
+        const hdWallet = enableHDWallet();
+        mockRepo._addSession(createMockSession({
+          id: 'pay_request',
+          type: 'request',
+          status: 'created',
+          crypto: undefined,
+          network: undefined,
+          depositAddress: undefined,
+          walletId: undefined,
+          apiKeyId: 9,
+        }));
+        collectionMock.resolveCollectionTargetForKey.mockResolvedValue({
+          mode: 'merchant',
+          address: merchantBtcWallet,
+          chain: 'bitcoin',
+        });
+
+        const updated = await manager.fulfillRequest('pay_request', 'BTC', 'bitcoin');
+
+        expect(collectionMock.resolveCollectionTargetForKey).toHaveBeenCalledWith(9, 'BTC', 'bitcoin');
+        expect(mockRepo.findActiveByDepositAddress).toHaveBeenCalledWith(merchantBtcWallet, 'BTC', 'pay_request');
+        expect(updated.depositAddress).toBe(merchantBtcWallet);
+        expect(updated.collectionMode).toBe('merchant');
+        expect(updated.derivationIndex).toBeUndefined();
+        expect(hdWallet.deriveNextAddress).not.toHaveBeenCalled();
+      });
     });
 
     describe('input validation', () => {

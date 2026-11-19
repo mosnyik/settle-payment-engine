@@ -146,6 +146,22 @@ export const config = {
         ? process.env.MONGORO_WEBHOOK_IPS.split(",").map((ip) => ip.trim())
         : [],
     },
+    // Merchant-collected assets: no payout - the merchant gets a WhatsApp
+    // message with the recipient's amount/account and 2Settle's profit/account.
+    // Sends via the same Meta Cloud API number/token as WhatsApp OTP.
+    merchantCollection: {
+      whatsapp: {
+        enabled: process.env.WHATSAPP_SETTLEMENT_ENABLED === "true",
+        templateName:
+          process.env.WHATSAPP_SETTLEMENT_TEMPLATE_NAME || "merchant_settlement",
+        templateLanguage: process.env.WHATSAPP_SETTLEMENT_TEMPLATE_LANG || "en",
+      },
+      profitAccount: {
+        bankName: process.env.PROFIT_ACCOUNT_BANK || "",
+        accountNumber: process.env.PROFIT_ACCOUNT_NUMBER || "",
+        accountName: process.env.PROFIT_ACCOUNT_NAME || "",
+      },
+    },
     telegram: {
       enabled: process.env.TELEGRAM_ALERTS_ENABLED === "true",
       botToken: process.env.TELEGRAM_BOT_TOKEN || "",

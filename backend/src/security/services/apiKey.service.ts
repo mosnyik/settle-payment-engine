@@ -8,6 +8,11 @@ import {
 } from '../types';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import { getHDWalletService } from '../../services/payment-engine/hd-wallet';
+import {
+  CollectionModes,
+  parseCollectionModes,
+  validateMerchantCollectionConfig,
+} from '../../services/payment-engine/collection';
 
 /**
  * API Key Service
@@ -42,6 +47,8 @@ interface ApiKeyRow extends RowDataPacket {
   parent_wallet_tron: string | null;
   confirmation_thresholds: string | null;
   is_sandbox: boolean;
+  collection_modes: string | Record<string, unknown> | null;
+  whatsapp_phone: string | null;
 }
 
 /**
@@ -94,6 +101,8 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
           : row.confirmation_thresholds)
       : null,
     isSandbox: Boolean(row.is_sandbox),
+    collectionModes: parseCollectionModes(row.collection_modes),
+    whatsappPhone: row.whatsapp_phone ?? null,
   };
 }
 
@@ -446,7 +455,84 @@ export async function getWebhookConfig(apiKeyId: number): Promise<{
 }
 
 /**
- * Update parent wallet addresses for an API key (user-provided sweep destinations)
+ * Rejected merchant wallet / collection settings. `problems` lists every
+ * failed check so the caller can fix them all at once.
+ */
+export class MerchantCollectionConfigError extends Error {
+  constructor(public readonly problems: string[]) {
+    super(`Invalid merchant collection settings: ${problems.join('; ')}`);
+    this.name = 'MerchantCollectionConfigError';
+  }
+}
+
+export interface MerchantCollectionUpdate {
+  /** Merged into the existing modes; set an asset to 'hd' to switch it back. */
+  collectionModes?: CollectionModes;
+  wallets?: {
+    bitcoin?: string | null;
+    ethereum?: string | null;
+    tron?: string | null;
+  };
+  whatsappPhone?: string | null;
+}
+
+/**
+ * Update merchant wallets, per-asset collection modes and the WhatsApp number.
+ *
+ * Validates the settings as they will be after the update (existing values
+ * merged with the changes), so a wallet can't be cleared or replaced with a
+ * bad address while an asset still collects into it. Nothing is written if
+ * any check fails.
+ */
+export async function updateMerchantCollection(
+  keyId: string,
+  update: MerchantCollectionUpdate
+): Promise<ApiKey | null> {
+  const existing = await getApiKeyByKeyId(keyId);
+  if (!existing) return null;
+
+  // undefined = keep existing; null or blank = clear
+  const pick = (next: string | null | undefined, current: string | null): string | null =>
+    next === undefined ? current : next?.trim() || null;
+  const wallets = {
+    bitcoin: pick(update.wallets?.bitcoin, existing.parentWalletBitcoin),
+    ethereum: pick(update.wallets?.ethereum, existing.parentWalletEthereum),
+    tron: pick(update.wallets?.tron, existing.parentWalletTron),
+  };
+  const collectionModes: CollectionModes = { ...existing.collectionModes, ...(update.collectionModes ?? {}) };
+  // 'hd' is the default - don't store it
+  for (const asset of Object.keys(collectionModes) as (keyof CollectionModes)[]) {
+    if (collectionModes[asset] === 'hd') delete collectionModes[asset];
+  }
+  const whatsappPhone = pick(update.whatsappPhone, existing.whatsappPhone);
+
+  const problems = validateMerchantCollectionConfig({ collectionModes, wallets, whatsappPhone });
+  if (problems.length > 0) {
+    throw new MerchantCollectionConfigError(problems);
+  }
+
+  await pool.query(
+    `UPDATE api_keys
+     SET parent_wallet_bitcoin = ?, parent_wallet_ethereum = ?, parent_wallet_tron = ?,
+         collection_modes = ?, whatsapp_phone = ?
+     WHERE key_id = ?`,
+    [
+      wallets.bitcoin,
+      wallets.ethereum,
+      wallets.tron,
+      Object.keys(collectionModes).length > 0 ? JSON.stringify(collectionModes) : null,
+      whatsappPhone,
+      keyId,
+    ]
+  );
+
+  return getApiKeyByKeyId(keyId);
+}
+
+/**
+ * Update parent wallet addresses for an API key (user-provided sweep
+ * destinations, and the deposit address for merchant-collected assets).
+ * Every address is checksum-validated for its chain.
  */
 export async function updateParentWallets(
   keyId: string,
@@ -456,33 +542,7 @@ export async function updateParentWallets(
     tron?: string | null;
   }
 ): Promise<ApiKey | null> {
-  const setClauses: string[] = [];
-  const values: unknown[] = [];
-
-  if (wallets.bitcoin !== undefined) {
-    setClauses.push('parent_wallet_bitcoin = ?');
-    values.push(wallets.bitcoin);
-  }
-  if (wallets.ethereum !== undefined) {
-    setClauses.push('parent_wallet_ethereum = ?');
-    values.push(wallets.ethereum);
-  }
-  if (wallets.tron !== undefined) {
-    setClauses.push('parent_wallet_tron = ?');
-    values.push(wallets.tron);
-  }
-
-  if (setClauses.length === 0) {
-    return getApiKeyByKeyId(keyId);
-  }
-
-  values.push(keyId);
-  await pool.query(
-    `UPDATE api_keys SET ${setClauses.join(', ')} WHERE key_id = ?`,
-    values
-  );
-
-  return getApiKeyByKeyId(keyId);
+  return updateMerchantCollection(keyId, { wallets });
 }
 
 /**

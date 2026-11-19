@@ -24,6 +24,7 @@ import { getHDWalletService } from '../hd-wallet';
 import { sessionOwnerService } from '../session-owner';
 import { SessionRepository, sessionRepository, UpdateSessionData, CreateSessionData } from './session-repository';
 import { getDepositWatcher } from '../watcher';
+import { resolveCollectionTargetForKey } from '../collection';
 
 const VALID_CRYPTO_NETWORKS: Record<string, string[]> = {
   BTC: ['bitcoin'],
@@ -305,7 +306,13 @@ export class SessionManager {
       resolvedInput.chargeFrom ?? 'crypto'
     );
 
-    // Try HD wallet first, fall back to legacy wallet pool
+    // Merchant-collected asset: deposit straight into the merchant's wallet.
+    // Otherwise HD wallet first, falling back to the legacy wallet pool.
+    const collection = await resolveCollectionTargetForKey(
+      resolvedInput.apiKeyId,
+      resolvedInput.crypto!,
+      resolvedInput.network!
+    );
     const hdWallet = getHDWalletService();
     let depositAddress: string;
     let walletId: number | undefined;
@@ -313,7 +320,13 @@ export class SessionManager {
     let hdChain: string | undefined;
     let expiresAt: Date;
 
-    if (hdWallet?.isEnabled()) {
+    if (collection.mode === 'merchant') {
+      // One address is reused across sessions, so only one open session per
+      // address + asset - otherwise deposits can't be told apart.
+      depositAddress = collection.address;
+      await this.assertDepositAddressAvailable(depositAddress, resolvedInput.crypto);
+      expiresAt = new Date(Date.now() + this.config.sessionTtlMinutes * 60 * 1000);
+    } else if (hdWallet?.isEnabled()) {
       const ownerWallet = resolvedInput.sessionOwnerId
         ? await sessionOwnerService.getSessionOwnerChainWallet(
             resolvedInput.sessionOwnerId,
@@ -386,6 +399,8 @@ export class SessionManager {
       bankRef: resolvedInput.bankRef,
       description: resolvedInput.description,
       isSandbox: resolvedInput.isSandbox,
+      collectionMode: collection.mode,
+      marketRate: rateLock.marketRate,
     };
 
     const session = await this.repository.create(sessionData);
@@ -717,7 +732,8 @@ export class SessionManager {
       'crypto'
     );
 
-    // Assign wallet (HD or legacy)
+    // Assign wallet (merchant's own wallet, HD, or legacy pool)
+    const collection = await resolveCollectionTargetForKey(session.apiKeyId, crypto as any, network as any);
     const hdWallet = getHDWalletService();
     let depositAddress: string;
     let walletId: number | undefined;
@@ -725,7 +741,11 @@ export class SessionManager {
     let hdChain: string | undefined;
     let expiresAt: Date;
 
-    if (hdWallet?.isEnabled()) {
+    if (collection.mode === 'merchant') {
+      depositAddress = collection.address;
+      await this.assertDepositAddressAvailable(depositAddress, crypto as any, sessionId);
+      expiresAt = new Date(Date.now() + this.config.sessionTtlMinutes * 60 * 1000);
+    } else if (hdWallet?.isEnabled()) {
       const ownerWallet = sessionOwnerId
         ? await sessionOwnerService.getSessionOwnerChainWallet(
             sessionOwnerId,
@@ -785,6 +805,8 @@ export class SessionManager {
       derivationIndex,
       hdChain: hdChain as any,
       expiresAt,
+      collectionMode: collection.mode,
+      marketRate: rateLock.marketRate,
     });
 
     // Link address to session for HD wallet audit trail

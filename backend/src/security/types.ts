@@ -39,6 +39,13 @@ export interface ApiKey {
   confirmationThresholds: Partial<Record<string, number>> | null;
   /** Sandbox/testnet key — skips real blockchain watching and real settlement */
   isSandbox: boolean;
+  /**
+   * Per-asset collection mode, e.g. {"BTC":"merchant"}. Assets not listed use
+   * 'hd'. 'merchant' collects straight into parentWallet<Chain>.
+   */
+  collectionModes: Partial<Record<string, 'hd' | 'merchant'>>;
+  /** WhatsApp number (with country code) that receives merchant-collection settlement instructions */
+  whatsappPhone: string | null;
 }
 
 export interface CreateApiKeyInput {

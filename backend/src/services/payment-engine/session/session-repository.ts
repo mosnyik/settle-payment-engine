@@ -44,6 +44,8 @@ export interface CreateSessionData {
   bankRef?: string;
   description?: string;
   isSandbox?: boolean;
+  collectionMode?: 'hd' | 'merchant';
+  marketRate?: number;
 }
 
 export interface UpdateSessionData {
@@ -73,6 +75,8 @@ export interface UpdateSessionData {
   derivationIndex?: number;
   hdChain?: HDChain;
   expiresAt?: Date;
+  collectionMode?: 'hd' | 'merchant';
+  marketRate?: number;
 }
 
 function rowToSession(row: any): PaymentSession {
@@ -119,6 +123,8 @@ function rowToSession(row: any): PaymentSession {
     bankRef: row.bank_ref || undefined,
     description: row.description || undefined,
     isSandbox: Boolean(row.is_sandbox),
+    collectionMode: row.collection_mode === 'merchant' ? 'merchant' : 'hd',
+    marketRate: row.market_rate != null ? Number(row.market_rate) : undefined,
   };
 }
 
@@ -137,8 +143,8 @@ export class SessionRepository {
           funding_wallet_index, parent_wallet,
           payer_id, receiver_id, session_owner_id, merchant_id, api_key_id, is_sandbox,
           expires_at, created_at, updated_at,
-          metadata, bank_ref, description
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          metadata, bank_ref, description, collection_mode, market_rate
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.id,
           data.reference,
@@ -172,6 +178,8 @@ export class SessionRepository {
           data.metadata ? JSON.stringify(data.metadata) : null,
           data.bankRef ?? null,
           data.description ?? null,
+          data.collectionMode ?? 'hd',
+          data.marketRate ?? null,
         ]
       );
 
@@ -474,6 +482,16 @@ export class SessionRepository {
     if (data.expiresAt !== undefined) {
       updates.push('expires_at = ?');
       values.push(data.expiresAt);
+    }
+
+    if (data.collectionMode !== undefined) {
+      updates.push('collection_mode = ?');
+      values.push(data.collectionMode);
+    }
+
+    if (data.marketRate !== undefined) {
+      updates.push('market_rate = ?');
+      values.push(data.marketRate);
     }
 
     updates.push('updated_at = ?');
